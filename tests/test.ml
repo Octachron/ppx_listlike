@@ -4,7 +4,7 @@ let rec iter f = function
   | Nil -> ()
 				  
 let l = [1;2;3;4]
-let l2 =
+let {listlike| a; b ;c; d |listlike} =
   Cons(1,
        Cons(2,
 	    Cons(3,
@@ -13,5 +13,5 @@ let l2 =
 	   )
       ) 
 				  
-let l = {listlike| {listlike_| 1; 2|listlike_} ; {listlike_|3; 4|listlike_} |listlike}
-let () = Format.printf "@["; iter (Format.printf "%s@;") l ; Format.printf"@]\n"
+let l = {listlike| 1 ; 2; 3; 4 |listlike}
+let () = Format.printf "@["; iter (Format.printf "%d@;") l ; Format.printf"@]\n"

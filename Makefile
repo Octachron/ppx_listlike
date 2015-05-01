@@ -8,3 +8,6 @@ main.native:main.ml
 
 tests/test.native:
 	ocamlbuild -cflags -ppx,"../ppx_listlike"  tests/test.native
+
+clean:
+	ocamlbuild -clean

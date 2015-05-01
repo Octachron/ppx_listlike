@@ -12,8 +12,10 @@ type ('desc,'ty) submk = {
     mk : loc:Loc.t -> 'desc -> 'ty;
     tuple: 'ty list -> 'desc;
     construct: Lid.t loc -> 'ty option -> 'desc; 
-    destruct: 'ty -> 'ty * 'ty option;
+    destruct: 'ty -> ('ty * 'ty) option;
+    ghost_loc : 'ty -> Loc.t;
     mapper: mapper -> 'ty -> 'ty;
+    parse : (Lexing.lexbuf->Parser.token) -> Lexing.lexbuf -> 'ty
   }
 
 let mk submk {cons;_} inner_loc loc ~hd ~tail =
@@ -28,17 +30,12 @@ let mk_nil submk {nil;_} nil_loc =
 	   
 let rec mk_list submk kind nil_loc mapper expr=
   match submk.destruct expr with
-  | e1, Some el ->
+  | Some(e1, el) ->
       let hd = submk.mapper mapper e1 in
       let tail = mk_list submk kind nil_loc mapper el
-      and loc = Loc.{ hd.pexp_loc with loc_ghost = true} in
+      and loc = submk.ghost_loc hd in
       mk submk kind loc loc ~hd ~tail
-  |  desc ->
-      let nil = mk_nil submk kind nil_loc in
-      let expr = mapper.expr mapper expr in
-      let loc = Loc.{ expr.pexp_loc with loc_ghost = true} in
-      mk submk kind loc loc ~hd:expr ~tail:nil  
-	 		    
+  | None -> mk_nil submk kind nil_loc	 		    
 
 let expr = {
     mk =(fun ~loc expr ->  H.Exp.mk ~loc expr);
@@ -47,78 +44,67 @@ let expr = {
     destruct =(
       fun expr ->
       match expr.pexp_desc with
-      | Pexp_construct( {Loc.txt=Lid.Lident "::" ; loc }, Some {pexp_desc=Pexp_tuple [el;l];_} ) ->
-	 (el, Some l)
+      | Pexp_construct(
+	  {Loc.txt=Lid.Lident "::" ; loc },
+	  Some {pexp_desc=Pexp_tuple [el;l];_}
+	) -> Some(el, l)
       | Pexp_construct( {Loc.txt=Lid.Lident "[]";loc}, None) ->
-	 expr, None
+	 None
       | _ -> assert false );
+    ghost_loc  = (fun expr -> Loc.{ expr.pexp_loc with loc_ghost=true } ); 
     mapper = ( fun mapper expr -> mapper.expr mapper expr);
+    parse = Parser.parse_expression;
   }
-	 
-			   
-module Exp = struct        
-    let mk {cons;_} inner_loc loc ~hd ~tail =
-      let args =  H.Exp.mk ~loc (Pexp_tuple [hd; tail]) in
-      H.Exp.mk ~loc (Pexp_construct(Loc.mkloc (Lid.Lident cons) inner_loc, Some args))
-	       
-let mk_nil {nil;_} nil_loc =
-   let loc = Loc.{ nil_loc with loc_ghost = true } in
-   let nil = Loc.{ txt = Lid.Lident nil; loc } in
-   H.Exp.mk ~loc (Pexp_construct (nil, None))
-	   
-let rec mk_list kind nil_loc mapper expr=
-  match expr.pexp_desc with
-  | Pexp_sequence(e1, el) ->
-      let hd = mapper.expr mapper e1 in
-      let tail = mk_list kind nil_loc mapper el
-      and loc = Loc.{ hd.pexp_loc with loc_ghost = true} in
-      mk kind loc loc ~hd ~tail
-  |  desc ->
-      let nil = mk_nil kind nil_loc in
-      let expr = mapper.expr mapper expr in
-      let loc = Loc.{ expr.pexp_loc with loc_ghost = true} in
-      mk kind loc loc ~hd:expr ~tail:nil  
-	 
-end
 
-module Pat = struct
-	       
-let mk {cons;_} inner_loc args loc =
-  H.Pat.mk ~loc (Ppat_construct(Loc.mkloc (Lid.Lident cons) inner_loc, Some args))
+let patt = {
+    mk = (fun ~loc patt -> H.Pat.mk ~loc patt);
+    tuple = (fun l -> Ppat_tuple l);
+    construct = (fun loc args -> Ppat_construct(loc,args) );
+    mapper = (fun mapper patt -> mapper.pat mapper patt); 
+    ghost_loc  = (fun pattern -> Loc.{ pattern.ppat_loc with loc_ghost=true } );
+    parse = Parser.parse_pattern;
+    destruct = (
+      fun pattern ->
+      match pattern.ppat_desc with
+      | Ppat_construct(
+	  {Loc.txt=Lid.Lident "::"; loc },
+	  Some {ppat_desc=Ppat_tuple [el;l];_}
+	) -> Some(el, l)
+      | Ppat_construct( {Loc.txt=Lid.Lident "[]"; loc }, None ) -> None
+      | _ -> assert false
+    );
+  }
 
-let rec mklist kind nil_loc = function
-    [] ->
-      let loc = Loc.{ nil_loc with loc_ghost = true } in
-      let nil = Loc.{ txt = Lid.Lident kind.nil; loc } in
-      H.Pat.mk ~loc (Ppat_construct (nil, None))
-  | p1 :: pl ->
-      let pat_pl = mklist kind nil_loc pl
-      and loc = Loc.{ p1.ppat_loc with  loc_ghost = true} in
-      let arg = H.Pat.mk ~loc (Ppat_tuple [p1; pat_pl]) in
-      mk kind Loc.{loc with loc_ghost = true} arg loc
-end
 
 let default = { cons="Cons"; nil="Nil"}	       
+	
+let const_expr mapper f = function
+  | { pexp_desc = Pexp_constant const; _ } as exp -> f mapper exp const
+  | x -> x
 
-module Map = struct		
-    let const mapper f = function
-      | { pexp_desc = Pexp_constant const; _ } as exp -> f mapper exp const
-      | x -> x
+let const_patt mapper f = function
+  | { ppat_desc = Ppat_constant const; _ } as patt -> f mapper patt const
+  | x -> x
+	    
+
+	   
+let string kind listify mapper exp = function
+  | Asttypes.Const_string(s, Some "listlike") -> 
+     let seq_expr = kind.parse Lexer.token @@
+		      Lexing.from_string @@ "["^s^"]" in
+     listify kind mapper seq_expr
+  | x -> exp 
+		
 	       
-    let string listify mapper exp = function
-      | Asttypes.Const_string(s, Some "listlike") -> 
-	 let seq_expr = Parser.parse_expression Lexer.token @@ Lexing.from_string s in
-	 listify mapper seq_expr
-      | x -> exp 
-  end
-	       
-let listify seq = mk_list expr default (Loc.none) seq  
+let listify kind seq = mk_list kind default (Loc.none) seq  
 		       
-let expression_map mapper = Map.(const mapper  @@ string listify)
+let expression_map mapper = const_expr mapper  @@ string expr @@ listify
+let pattern_map mapper = const_patt mapper @@ string patt @@ listify
 
 let listlike_mapper argv = { 
   default_mapper with
-  expr = expression_map 
+    expr = expression_map;
+    pat= pattern_map
 }
 
 let () = register "listlike" listlike_mapper
