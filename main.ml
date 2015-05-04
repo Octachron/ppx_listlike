@@ -3,8 +3,9 @@ open Ast_mapper
 module H = Ast_helper       
 module Loc = Location
 module Lid = Longident	       
-
+module E=Env_mapper
 type 'a loc = 'a Loc.loc
+		 
 
 let ppf = Format.err_formatter
 	    
@@ -252,10 +253,6 @@ let extract_cstring = function
   | {pexp_desc = Pexp_constant (Asttypes.Const_string(s,_) ); _ } -> Some s
   | _ -> None
 
-	   
-let ( **? ) opt1 opt2 = match opt1,opt2 with
-  | Some x, Some y -> Some ( x,y )
-  | _ -> None
 
 let ll_register l =
   let n = List.length l in
