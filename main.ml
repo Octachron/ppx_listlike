@@ -131,15 +131,61 @@ let term_parse s=
       | _ -> ignore_comments cl (k-1) in
   seek @@ (String.length s) - 1
 	    
-module Env = Map.Make(struct type t = string let compare (x:string) y = compare x y end)
-
-let (|+>) env (key,value) = Env.add key value env				    
-		     
+module Env =
+  struct 
+    include Map.Make(
+		struct
+		  type t = string
+		  let compare (x:string) y = compare x y
+		end)
+    let (|+>) env (key,value) = add key value env 		  
+  end
+    
+type array_kind = Array | String | Bigarray
+	  
+module Indices =
+  struct
+    include Map.Make(
+		struct
+		  type t=array_kind
+		  let compare (x:array_kind) y= compare x y
+		end)
+    let (|+>) env (key,value) = add key value env 		  
+  end
+    
 let env =
-  Env.empty
-  |+> ( "ll",  { cons="Cons"; nil="Nil" })
-  |> ref
+  Env.(
+    empty
+    |+> ( "ll",  { cons="Cons"; nil="Nil" })
+    |> ref
+  )
 
+let array_env =
+  Indices.(
+    empty
+    |+> (Array, {cons="Cons_array"; nil= "Nil_array"})
+    |+> (String, {cons="Cons_string"; nil= "Nil_string"})
+    |+> (Bigarray, {cons="Cons_bigarray"; nil= "Nil_bigarray"})
+  )
+
+let identify_array_kind lid =
+  let open Lid in
+  match lid with
+  | Lident (".()" | ".()<-")
+  | Ldot( Lident "Array", ("get"|"set"|"unsafe_set"|"unsafe_get") ) ->
+     Some Array
+  | Lident (".[]" | ".[]<-")
+  | Ldot(Lident "String", ("get"|"set"|"unsafe_set"|"unsafe_get") ) ->
+     Some String
+  | Lident (".{}" | ".{}<-")
+  | Ldot(
+	Ldot ( Lident "Bigarray", "Array1" ),
+	("get"|"set"|"unsafe_set"|"unsafe_get")
+      )  ->
+     Some Bigarray
+  | _ -> None 
+
+       
 (* Imported from Syntaxerr.ml with location information correction *)       
 let subparser_error loc  =
   let open Syntaxerr in
@@ -229,7 +275,7 @@ let ll_register l =
   | 3 -> 
      let _ = List.fold_left assign 2 nameless_args in
      let name, cons , nil = args.(0), args.(1), args.(2) in
-     env := !env |+> (name, {cons;nil})
+     env := Env.( !env |+> (name, {cons;nil}) )
   | _ -> ()
 	   
 let ll_unregister  = function
@@ -315,9 +361,28 @@ let const_patt mapper f = function
      f patt mapper super ppat_loc const
   | x ->default_mapper.pat mapper x			     
 
-let unit loc = Pexp_construct ( Loc.{txt= Lid.Lident "()";loc}, None) 
+let unit loc = Pexp_construct ( Loc.{txt= Lid.Lident "()";loc}, None)
+		      
+let uniformize_args kind mapper loc  =
+  function
+  | arg1::(lbl,seq)::q ->
+     let constr = Indices.find kind array_env in
+     arg1::(
+       lbl,
+       mk_list
+	 ( fun loc -> loc)
+	 { expr with destruct = seq_destruct }
+	 false
+	 constr
+	 Loc.{ loc with loc_start = loc.loc_end }
+	 mapper
+	 seq
+     )::q
+  | args -> args
+    
 		
 let expression_map mapper exp =
+  let default () = default_mapper.expr mapper exp in
   match exp.pexp_desc with
   | Pexp_constant const -> quoted_string expr mapper exp exp.pexp_loc const
   | Pexp_extension ({Loc.txt="listlike"; _ }, PStr l) ->
@@ -325,8 +390,22 @@ let expression_map mapper exp =
      { exp with pexp_desc = unit exp.pexp_loc }
   | Pexp_sequence (e1,e2) ->
      let e1' = mapper.expr mapper e1 in
-     { exp with pexp_desc = Pexp_sequence (e1', mapper.expr mapper e2 ) } 
-  | _ -> default_mapper.expr mapper exp
+     { exp with pexp_desc = Pexp_sequence (e1', mapper.expr mapper e2 ) }
+  | Pexp_apply (f, args ) ->
+     begin
+       match f.pexp_desc with
+       | Pexp_ident ident ->
+	  ( match identify_array_kind ident.Loc.txt with
+	    | Some kind ->
+	       let loc = exp.pexp_loc in
+	       { f with pexp_desc =
+			  Pexp_apply( f, uniformize_args kind mapper loc args )
+	       }
+	    | None -> default ()
+	  )
+      | _ -> default ()
+    end 
+  | _ -> default ()
 
     
 let pattern_map mapper = const_patt mapper @@ quoted_string
