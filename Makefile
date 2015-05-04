@@ -6,7 +6,7 @@ all: ppx_listlike tests/test.native
 main.native:main.ml
 	ocamlbuild -pkg compiler-libs.common main.native
 
-tests/test.native:
+tests/test.native: tests/test.ml main.ml
 	ocamlbuild -cflags -ppx,"../ppx_listlike"  tests/test.native
 
 clean:
