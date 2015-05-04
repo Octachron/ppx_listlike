@@ -7,9 +7,10 @@ module Lid = Longident
 type 'a loc = 'a Loc.loc
 
 let ppf = Format.err_formatter
-		 
+	    
 type t = { cons: string; nil: string}
 
+(* Subtree builder abstracting over pattern/expr subtree *)	   
 type ('desc,'ty) submk = {
     mk : loc:Loc.t -> 'desc -> 'ty;
     tuple: 'ty list -> 'desc;
@@ -20,6 +21,21 @@ type ('desc,'ty) submk = {
     parse : (Lexing.lexbuf->Parser.token) -> Lexing.lexbuf -> 'ty
   }
 
+(* Correct locations when reconstructing subtree for list litterals *)
+let relocalize ref_loc loc =
+  let open Loc in
+  let ref = ref_loc.loc_start in
+  let repos rel =
+    Lexing.{
+	ref with
+	pos_lnum = ref.pos_lnum + rel.pos_lnum - 1;
+	pos_cnum = ref.pos_cnum + rel.pos_cnum - 1 (* -1 for the ghost "[" *) 
+    } in
+  { loc_ghost = loc.loc_ghost;
+    loc_start = repos loc.loc_start;
+    loc_end = repos loc.loc_end
+  }
+    
 let mk submk {cons;_} inner_loc loc ~hd ~tail =
   let args =  submk.mk ~loc @@ submk.tuple [hd; tail] in
   submk.mk ~loc @@
@@ -30,15 +46,15 @@ let mk_nil submk {nil;_} nil_loc =
    let nil = Loc.{ txt = Lid.Lident nil; loc } in
    submk.mk ~loc @@ submk.construct nil None
 	   
-let rec mk_list submk term kind nil_loc mapper expr=
+let rec mk_list reloc submk term kind nil_loc mapper expr=
   match submk.destruct expr with
   | None -> mk_nil submk kind nil_loc	 		    
   | Some(e1, el) ->
      let hd = submk.mapper mapper e1 in
      match submk.destruct el, term with
      | Some _, _ | _, false -> 
-      let tail = mk_list submk term kind nil_loc mapper el
-      and loc = submk.ghost_loc hd in
+      let tail = mk_list reloc submk term kind nil_loc mapper el
+      and loc = reloc @@ submk.ghost_loc hd in
       mk submk kind loc loc ~hd ~tail
      | None, true -> hd
 
@@ -79,9 +95,6 @@ let patt = {
       | _ -> assert false
     );
   }
-
-
-let default = { cons="Cons"; nil="Nil"}	       
 	
 let const_expr mapper f = function
   | { pexp_desc = Pexp_constant const; pexp_loc } as super ->
@@ -93,7 +106,7 @@ let const_patt mapper f = function
      f patt mapper super ppat_loc const
   | x ->default_mapper.pat mapper x
 	    
-
+(* Check if s ends with a ".." token *)
 let term_parse s=
   let none = false, s in
   let rec seek k =
@@ -114,45 +127,14 @@ let term_parse s=
 	    
 module Env = Map.Make(struct type t = string let compare (x:string) y = compare x y end)
 
-let (|+>) env (key,value) = Env.add key value env
-let (|?) name env = Env.mem name env				    
+let (|+>) env (key,value) = Env.add key value env				    
 		     
-let env =  Env.empty |+> ( "ll",  { cons="Cons"; nil="Nil" }) |> ref
-				
-let to_path s =
-  let len = String.length s in
-  let rec split path start k =
-    if k>=len then (String.sub s start (len-start) :: path ) else
-      match s.[k] with
-      | '_' -> split (String.sub s start (k-start) :: path) (k+1) (k+1)
-      | _ -> split path start (k+1)
-  in
-  List.rev @@ split [] 0 0
+let env =
+  Env.empty
+  |+> ( "ll",  { cons="Cons"; nil="Nil" })
+  |> ref
 
-let rec constructors path =
-  let buffer = Buffer.create 20 in
-  let rec aux = function
-    | [] -> Buffer.contents buffer
-    | ""::q -> aux q
-    | a::q -> List.iter (Buffer.add_string buffer) ["_";a]; aux q in
-  let suffix = aux path in
-  { cons = "Cons"^suffix; nil = "Nil"^suffix }
-								
-
-let relocalize ref_loc loc =
-  let open Loc in
-  let ref = ref_loc.loc_start in
-  let repos rel =
-    Lexing.{
-	ref with
-	pos_lnum = ref.pos_lnum + rel.pos_lnum;
-	pos_cnum = ref.pos_cnum + rel.pos_cnum - 1 (* -1 for the ghost "[" *) 
-    } in
-  { loc_ghost = loc.loc_ghost;
-    loc_start = repos loc.loc_start;
-    loc_end = repos loc.loc_end
-  }
-    
+(* Imported from Syntaxerr.ml with location information correction *)       
 let subparser_error loc  =
   let open Syntaxerr in
   let reloc = relocalize loc in
@@ -203,27 +185,43 @@ let string listify kind mapper super loc = function
 	   |  Syntaxerr.Error err -> subparser_error loc err
 	   | Parsing.Parse_error ->
 	      raise @@ Loc.Error(
-			   Loc.error ~loc "Error parsing listlike litteral"
+			   Loc.error ~loc "Error parsing listlike literal"
 			 )
 	 in
-	 listify kind term constr mapper seq_expr
+	 let new_mapper =
+	   { mapper with location = (fun mapper loc' ->
+				     relocalize loc loc' ) } in 
+	 listify kind term constr loc new_mapper seq_expr
      else super
   | x -> super
 	   
 	       
-let listify kind term constr = mk_list kind term constr (Loc.none)  
+let listify kind term constr ref_loc = mk_list (relocalize ref_loc) kind term constr Loc.{ ref_loc with loc_start = ref_loc.loc_end }  
 
 let extract_cstring = function
   | {pexp_desc = Pexp_constant (Asttypes.Const_string(s,_) ); _ } -> Some s
   | _ -> None
-
 
 	   
 let ( **? ) opt1 opt2 = match opt1,opt2 with
   | Some x, Some y -> Some ( x,y )
   | _ -> None
 
-let ll_register (name,(cons,nil)) =
+let ll_register l =
+  let args = Array.make 3 "" in
+  let free = Array.make 3 true in
+  let mark i x = args.(i)<- x; free.(i) <- false in
+  let fold l = function
+    | "name", x ->  mark 0 x; l 
+    | "cons", x  -> mark 1 x; l
+    | "nil", x -> mark 2 x; l
+    | "", x -> x::l
+    | _ -> assert false in
+  let nameless_args = List.fold_left fold [] l in
+  let rec assign i name =
+    if free.(i) then (mark i name; i - 1) else assign (i-1) name in
+  let _ = List.fold_left assign 2 nameless_args in
+  let name, cons , nil = args.(0), args.(1), args.(2) in
   env := !env |+> (name, {cons;nil})
 	   
 let extension_iter =
@@ -238,7 +236,7 @@ let extension_iter =
      begin
        let ( ~? ) =  extract_cstring in  
       match ~?e1 **? ~?e2 **? ~?e3 with
-      | Some x -> ll_register x
+      | Some (e1,(e2,e3)) -> ll_register [l1,e1; l2, e2; l3, e3]
       | None -> ()
      end
   | _ -> ()
