@@ -685,3 +685,10 @@ let default_mapper =
          | PPat (x, g) -> PPat ( snd @@ this.pat this env  x, g |>? this.expr this env |>? snd)
       );
   }
+
+let to_transform env env_mapper =
+  Ppx_register.{
+      implem = (fun structure -> env_mapper.structure env_mapper env structure);
+      iface = (fun signature -> env_mapper.signature env_mapper env signature);
+  }
+    
