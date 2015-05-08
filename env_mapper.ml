@@ -51,6 +51,10 @@ type 'env t = {
   with_constraint: 'env t -> 'env -> with_constraint -> 'env * with_constraint;
 }
 
+
+let rm_env sel_mapper mapper env obj =
+  sel_mapper mapper env obj |> snd   
+		
 let map_fst f env (x, y) = let env, x' = f env x in env,(x', y)
 let map_snd f env (x, y) = let env,y = f env y in env, (x, y)
 let map_tuple f1 f2 (x, y) = (f1 x, f2 y)
@@ -128,7 +132,7 @@ module T = struct
       | Ptyp_any -> any ~loc ~attrs ()
       | Ptyp_var s -> var ~loc ~attrs s
       | Ptyp_arrow (lab, t1, t2) ->
-         arrow ~loc ~attrs lab (snd @@ sub.typ sub env t1) (snd @@ sub.typ sub env t2)
+         arrow ~loc ~attrs lab (rm_env sub.typ sub env t1) (rm_env sub.typ sub env t2)
       | Ptyp_tuple tyl -> tuple ~loc ~attrs (thread (sub.typ sub) env tyl)
       | Ptyp_constr (lid, tl) ->
          constr ~loc ~attrs (map_loc sub env lid) (thread (sub.typ sub) env tl)
@@ -139,10 +143,10 @@ module T = struct
 	 object_ ~loc ~attrs (thread f env l) o
       | Ptyp_class (lid, tl) ->
          class_ ~loc ~attrs (map_loc sub env lid) (thread (sub.typ sub) env tl)
-      | Ptyp_alias (t, s) -> alias ~loc ~attrs (snd @@ sub.typ sub env t) s
+      | Ptyp_alias (t, s) -> alias ~loc ~attrs (rm_env sub.typ sub env t) s
       | Ptyp_variant (rl, b, ll) ->
          variant ~loc ~attrs (thread (row_field sub) env rl) b ll
-      | Ptyp_poly (sl, t) -> poly ~loc ~attrs sl (snd @@ sub.typ sub env t)
+      | Ptyp_poly (sl, t) -> poly ~loc ~attrs sl (rm_env sub.typ sub env t)
       | Ptyp_package (lid, l) ->
          package ~loc ~attrs (map_loc sub env lid)
 		 (thread (map_tuple__2 (map_loc sub) (sub.typ sub) )  env l )
@@ -165,7 +169,7 @@ module T = struct
 		(env,env,env)
                 ptype_cstrs)
       ~kind:(sub.type_kind sub env ptype_kind)
-      ?manifest:(ptype_manifest |>? sub.typ sub env |>? snd)
+      ?manifest:(ptype_manifest |>? rm_env sub.typ sub env)
       ~loc:(sub.location sub env ptype_loc)
       ~attrs:(sub.attributes sub env ptype_attributes)
 
@@ -193,7 +197,7 @@ module T = struct
 
   let map_extension_constructor_kind sub env = function
       Pext_decl(ctl, cto) ->
-        Pext_decl(map_constructor_arguments sub env ctl, cto |>? sub.typ sub env |>? snd)
+        Pext_decl(map_constructor_arguments sub env ctl, cto |>? rm_env sub.typ sub env)
     | Pext_rebind li ->
         Pext_rebind (map_loc sub env li)
 
@@ -222,7 +226,7 @@ module CT = struct
         constr ~loc ~attrs (map_loc sub env lid) (thread (sub.typ sub) env tys)
     | Pcty_signature x -> signature ~loc ~attrs (sub.class_signature sub env x)
     | Pcty_arrow (lab, t, ct) ->
-        arrow ~loc ~attrs lab (snd @@ sub.typ sub env t) (sub.class_type sub env ct)
+        arrow ~loc ~attrs lab (rm_env sub.typ sub env t) (sub.class_type sub env ct)
     | Pcty_extension x -> extension ~loc ~attrs (sub.extension sub env x)
 
   let map_field sub env {pctf_desc = desc; pctf_loc = loc; pctf_attributes = attrs}
@@ -232,16 +236,16 @@ module CT = struct
     env,
     match desc with
     | Pctf_inherit ct -> inherit_ ~loc ~attrs (sub.class_type sub env ct)
-    | Pctf_val (s, m, v, t) -> val_ ~loc ~attrs s m v (snd @@ sub.typ sub env t)
-    | Pctf_method (s, p, v, t) -> method_ ~loc ~attrs s p v (snd @@ sub.typ sub env t)
+    | Pctf_val (s, m, v, t) -> val_ ~loc ~attrs s m v (rm_env sub.typ sub env t)
+    | Pctf_method (s, p, v, t) -> method_ ~loc ~attrs s p v (rm_env sub.typ sub env t)
     | Pctf_constraint (t1, t2) ->
-        constraint_ ~loc ~attrs (snd @@ sub.typ sub env t1) (snd @@ sub.typ sub env t2)
+        constraint_ ~loc ~attrs (rm_env sub.typ sub env t1) (rm_env sub.typ sub env t2)
     | Pctf_attribute x -> attribute ~loc ( try_ x @@ sub.attribute sub env )
     | Pctf_extension x -> extension ~loc ~attrs (sub.extension sub env x)
 
   let map_signature sub env {pcsig_self; pcsig_fields} =
     Csig.mk
-      (snd @@ sub.typ sub env pcsig_self)
+      (rm_env sub.typ sub env pcsig_self)
       (thread (sub.class_type_field sub) env pcsig_fields)
 end
 
@@ -270,10 +274,10 @@ module MT = struct
 				    
   let map_with_constraint sub env mt = env, match mt with
     | Pwith_type (lid, d) ->
-        Pwith_type (map_loc sub env lid, snd @@ sub.type_declaration sub env d)
+        Pwith_type (map_loc sub env lid, rm_env sub.type_declaration sub env d)
     | Pwith_module (lid, lid2) ->
         Pwith_module (map_loc sub env lid, map_loc sub env lid2)
-    | Pwith_typesubst d -> Pwith_typesubst (snd @@ sub.type_declaration sub env d)
+    | Pwith_typesubst d -> Pwith_typesubst (rm_env sub.type_declaration sub env d)
     | Pwith_modsubst (s, lid) ->
         Pwith_modsubst (map_loc sub env s, map_loc sub env lid)
 
@@ -284,8 +288,8 @@ module MT = struct
       | Psig_value vd -> value ~loc (sub.value_description sub env vd)
       | Psig_type ((*rf,*) l) -> type_ ~loc (*rf*) (thread (sub.type_declaration sub) env l)
       | Psig_typext te -> type_extension ~loc (sub.type_extension sub env te)
-      | Psig_exception ed -> exception_ ~loc (snd @@ sub.extension_constructor sub env ed)
-      | Psig_module x -> module_ ~loc (snd @@ sub.module_declaration sub env x)
+      | Psig_exception ed -> exception_ ~loc (rm_env sub.extension_constructor sub env ed)
+      | Psig_module x -> module_ ~loc (rm_env sub.module_declaration sub env x)
       | Psig_recmodule l ->
          rec_module ~loc (thread (sub.module_declaration sub) env l)
       | Psig_modtype x -> modtype ~loc (sub.module_type_declaration sub env x)
@@ -320,7 +324,7 @@ module M = struct
     | Pmod_constraint (m, mty) ->
         constraint_ ~loc ~attrs (sub.module_expr sub env m)
                     (sub.module_type sub env mty)
-    | Pmod_unpack e -> unpack ~loc ~attrs (snd @@ sub.expr sub env e)
+    | Pmod_unpack e -> unpack ~loc ~attrs (rm_env sub.expr sub env e)
     | Pmod_extension x -> extension ~loc ~attrs (sub.extension sub env x)
 
   let map_structure_item sub env {pstr_loc = loc; pstr_desc = desc} =
@@ -328,12 +332,12 @@ module M = struct
     let loc = sub.location sub env loc in
     let si = match desc with
       | Pstr_eval (x, attrs) ->
-	 eval ~loc ~attrs:(sub.attributes sub env attrs) (snd @@ sub.expr sub env x)
+	 eval ~loc ~attrs:(sub.attributes sub env attrs) (rm_env sub.expr sub env x)
       | Pstr_value (r, vbs) -> value ~loc r (thread_opt (sub.value_binding sub) env vbs)
       | Pstr_primitive vd -> primitive ~loc (sub.value_description sub env vd)
       | Pstr_type l -> type_ ~loc (thread (sub.type_declaration sub) env l)
       | Pstr_typext te -> type_extension ~loc (sub.type_extension sub env  te)
-      | Pstr_exception ed -> exception_ ~loc (snd @@ sub.extension_constructor sub env ed)
+      | Pstr_exception ed -> exception_ ~loc (rm_env sub.extension_constructor sub env ed)
       | Pstr_module x -> module_ ~loc ( try_ x @@ sub.module_binding sub env )
       | Pstr_recmodule l -> rec_module ~loc (thread_opt (sub.module_binding sub) env l)
       | Pstr_modtype x -> modtype ~loc (sub.module_type_declaration sub env x)
@@ -361,65 +365,68 @@ module E = struct
     | Pexp_constant x -> constant ~loc ~attrs x
     | Pexp_let (r, vbs, e) ->
         let_ ~loc ~attrs r (thread_opt (sub.value_binding sub) env vbs)
-          ( snd @@ sub.expr sub env e)
+          ( rm_env sub.expr sub env e)
     | Pexp_fun (lab, def, p, e) ->
-        fun_ ~loc ~attrs lab ( def |>? sub.expr sub env |>? snd) (snd @@ sub.pat sub env p)
-          (snd @@ sub.expr sub env e)
+        fun_ ~loc ~attrs lab ( def |>? rm_env sub.expr sub env) (rm_env sub.pat sub env p)
+          (rm_env sub.expr sub env e)
     | Pexp_function pel -> function_ ~loc ~attrs (sub.cases sub env pel)
     | Pexp_apply (e, l) ->
-        apply ~loc ~attrs ( snd @@ sub.expr sub env e) ( thread (map_snd @@ sub.expr sub) env l)
+        apply ~loc ~attrs ( rm_env sub.expr sub env e) ( thread (map_snd @@ sub.expr sub) env l)
     | Pexp_match (e, pel) ->
-        match_ ~loc ~attrs ( snd @@ sub.expr sub env e) (sub.cases sub env pel)
-    | Pexp_try (e, pel) -> try_ ~loc ~attrs ( snd @@ sub.expr sub env e) (sub.cases sub env pel)
+        match_ ~loc ~attrs ( rm_env sub.expr sub env e) (sub.cases sub env pel)
+    | Pexp_try (e, pel) -> try_ ~loc ~attrs ( rm_env sub.expr sub env e) (sub.cases sub env pel)
     | Pexp_tuple el -> tuple ~loc ~attrs (thread (sub.expr sub) env el)
     | Pexp_construct (lid, arg) ->
-        construct ~loc ~attrs (map_loc sub env lid) ( arg |>? sub.expr sub env |>? snd )
+       construct ~loc ~attrs (map_loc sub env lid)
+		 ( arg |>? rm_env sub.expr sub env)
     | Pexp_variant (lab, eo) ->
-        variant ~loc ~attrs lab ( eo |>? sub.expr sub env |>? snd )
+        variant ~loc ~attrs lab ( eo |>? rm_env sub.expr sub env )
     | Pexp_record (l, eo) ->
         record ~loc ~attrs (thread (map_tuple__2 (map_loc sub) (sub.expr sub)) env l)
-          (eo |>? sub.expr sub env |>? snd )
+          (eo |>? rm_env sub.expr sub env)
     | Pexp_field (e, lid) ->
-        field ~loc ~attrs (snd @@ sub.expr sub env e) (map_loc sub env lid)
+        field ~loc ~attrs (rm_env sub.expr sub env e) (map_loc sub env lid)
     | Pexp_setfield (e1, lid, e2) ->
-        setfield ~loc ~attrs (snd @@ sub.expr sub env e1) (map_loc sub env lid)
-          (snd @@ sub.expr sub env e2)
+        setfield ~loc ~attrs (rm_env sub.expr sub env e1) (map_loc sub env lid)
+          (rm_env sub.expr sub env e2)
     | Pexp_array el -> array ~loc ~attrs (thread (sub.expr sub) env el)
     | Pexp_ifthenelse (e1, e2, e3) ->
-        ifthenelse ~loc ~attrs ( snd @@ sub.expr sub env e1) ( snd @@ sub.expr sub env e2)
-          ( e3 |>? sub.expr sub env |>? snd )
+        ifthenelse ~loc ~attrs ( rm_env sub.expr sub env e1) ( rm_env sub.expr sub env e2)
+          ( e3 |>? rm_env sub.expr sub env )
     | Pexp_sequence (e1, e2) ->
        let env, e1 = sub.expr sub env e1 in
-        sequence ~loc ~attrs e1 (snd @@ sub.expr sub env e2)
+        sequence ~loc ~attrs e1 (rm_env sub.expr sub env e2)
     | Pexp_while (e1, e2) ->
-        while_ ~loc ~attrs ( snd @@ sub.expr sub env e1) ( snd @@ sub.expr sub env e2)
+        while_ ~loc ~attrs ( rm_env sub.expr sub env e1) ( rm_env sub.expr sub env e2)
     | Pexp_for (p, e1, e2, d, e3) ->
-        for_ ~loc ~attrs (snd @@ sub.pat sub env p) (snd @@ sub.expr sub env e1) ( snd @@ sub.expr sub env e2) d
-          (snd @@ sub.expr sub env e3)
+        for_ ~loc ~attrs (rm_env sub.pat sub env p) (rm_env sub.expr sub env e1) ( rm_env sub.expr sub env e2) d
+          (rm_env sub.expr sub env e3)
     | Pexp_coerce (e, t1, t2) ->
-        coerce ~loc ~attrs (snd @@ sub.expr sub env e) ( t1 |>? sub.typ sub env |>? snd )
-          ( snd @@ sub.typ sub env t2)
+       coerce ~loc ~attrs (rm_env sub.expr sub env e)
+	      ( t1 |>? rm_env sub.typ sub env)
+          ( rm_env sub.typ sub env t2)
     | Pexp_constraint (e, t) ->
-        constraint_ ~loc ~attrs (snd @@ sub.expr sub env e) (snd @@ sub.typ sub env t)
-    | Pexp_send (e, s) -> send ~loc ~attrs (snd @@ sub.expr sub env e) s
+       constraint_ ~loc ~attrs (rm_env sub.expr sub env e)
+		   (rm_env sub.typ sub env t)
+    | Pexp_send (e, s) -> send ~loc ~attrs (rm_env sub.expr sub env e) s
     | Pexp_new lid -> new_ ~loc ~attrs (map_loc sub env lid)
     | Pexp_setinstvar (s, e) ->
-        setinstvar ~loc ~attrs (map_loc sub env s) (snd @@ sub.expr sub env e)
+        setinstvar ~loc ~attrs (map_loc sub env s) (rm_env sub.expr sub env e)
     | Pexp_override sel ->
         override ~loc ~attrs
           (thread (map_tuple__2 (map_loc sub) (sub.expr sub)) env sel)
     | Pexp_letmodule (s, me, e) ->
         letmodule ~loc ~attrs (map_loc sub env s) (sub.module_expr sub env me)
-          (snd @@ sub.expr sub env e)
-    | Pexp_assert e -> assert_ ~loc ~attrs (snd @@ sub.expr sub env e)
-    | Pexp_lazy e -> lazy_ ~loc ~attrs (snd @@ sub.expr sub env e)
+          (rm_env sub.expr sub env e)
+    | Pexp_assert e -> assert_ ~loc ~attrs (rm_env sub.expr sub env e)
+    | Pexp_lazy e -> lazy_ ~loc ~attrs (rm_env sub.expr sub env e)
     | Pexp_poly (e, t) ->
-        poly ~loc ~attrs (snd @@ sub.expr sub env e) (t |>? sub.typ sub env |>? snd)
+        poly ~loc ~attrs (rm_env sub.expr sub env e) (t |>? rm_env sub.typ sub env )
     | Pexp_object cls -> object_ ~loc ~attrs (sub.class_structure sub env cls)
-    | Pexp_newtype (s, e) -> newtype ~loc ~attrs s (snd @@ sub.expr sub env e)
+    | Pexp_newtype (s, e) -> newtype ~loc ~attrs s (rm_env sub.expr sub env e)
     | Pexp_pack me -> pack ~loc ~attrs (sub.module_expr sub env me)
     | Pexp_open (ovf, lid, e) ->
-        open_ ~loc ~attrs ovf (map_loc sub env lid) (snd @@ sub.expr sub env e)
+        open_ ~loc ~attrs ovf (map_loc sub env lid) (rm_env sub.expr sub env e)
     | Pexp_extension x -> extension ~loc ~attrs (sub.extension sub env x)
 end
 
@@ -434,26 +441,26 @@ module P = struct
     match desc with
     | Ppat_any -> any ~loc ~attrs ()
     | Ppat_var s -> var ~loc ~attrs (map_loc sub env s)
-    | Ppat_alias (p, s) -> alias ~loc ~attrs (snd @@ sub.pat sub env p) (map_loc sub env s)
+    | Ppat_alias (p, s) -> alias ~loc ~attrs (rm_env sub.pat sub env p) (map_loc sub env s)
     | Ppat_constant c -> constant ~loc ~attrs c
     | Ppat_interval (c1, c2) -> interval ~loc ~attrs c1 c2
     | Ppat_tuple pl -> tuple ~loc ~attrs (thread (sub.pat sub) env pl)
     | Ppat_construct (l, p) ->
-        construct ~loc ~attrs (map_loc sub env l) ( p |>? sub.pat sub env |>? snd )
-    | Ppat_variant (l, p) -> variant ~loc ~attrs l ( p|>? sub.pat sub env |>? snd )
+        construct ~loc ~attrs (map_loc sub env l) ( p |>? rm_env sub.pat sub env )
+    | Ppat_variant (l, p) -> variant ~loc ~attrs l ( p|>? rm_env sub.pat sub env )
     | Ppat_record (lpl, cf) ->
         record ~loc ~attrs
                (thread (map_tuple__2 (map_loc sub) (sub.pat sub)) env lpl) cf
     | Ppat_array pl -> array ~loc ~attrs (thread (sub.pat sub) env pl)
     | Ppat_or (p1, p2) ->
        let env,p1 = sub.pat sub env p1 in
-       or_ ~loc ~attrs p1 (snd @@ sub.pat sub env p2)
+       or_ ~loc ~attrs p1 (rm_env sub.pat sub env p2)
     | Ppat_constraint (p, t) ->
-        constraint_ ~loc ~attrs ( snd @@ sub.pat sub env p) ( snd @@ sub.typ sub env t)
+        constraint_ ~loc ~attrs ( rm_env sub.pat sub env p) ( rm_env sub.typ sub env t)
     | Ppat_type s -> type_ ~loc ~attrs (map_loc sub env s)
-    | Ppat_lazy p -> lazy_ ~loc ~attrs (snd @@ sub.pat sub env p)
+    | Ppat_lazy p -> lazy_ ~loc ~attrs (rm_env sub.pat sub env p)
     | Ppat_unpack s -> unpack ~loc ~attrs (map_loc sub env s)
-    | Ppat_exception p -> exception_ ~loc ~attrs ( snd @@ sub.pat sub env p)
+    | Ppat_exception p -> exception_ ~loc ~attrs ( rm_env sub.pat sub env p)
     | Ppat_extension x -> extension ~loc ~attrs (sub.extension sub env x)
 end
 
@@ -470,8 +477,8 @@ module CE = struct
         structure ~loc ~attrs (sub.class_structure sub env s)
     | Pcl_fun (lab, e, p, ce) ->
         fun_ ~loc ~attrs lab
-          ( e |>? sub.expr sub env |>? snd)
-          (snd @@ sub.pat sub env p)
+          ( e |>? rm_env sub.expr sub env)
+          (rm_env sub.pat sub env p)
           (sub.class_expr sub env ce)
     | Pcl_apply (ce, l) ->
         apply ~loc ~attrs (sub.class_expr sub env ce)
@@ -484,8 +491,8 @@ module CE = struct
     | Pcl_extension x -> extension ~loc ~attrs (sub.extension sub env x)
 
   let map_kind sub env = function
-    | Cfk_concrete (o, e) -> Cfk_concrete (o, snd @@ sub.expr sub env e)
-    | Cfk_virtual t -> Cfk_virtual ( snd @@ sub.typ sub env t)
+    | Cfk_concrete (o, e) -> Cfk_concrete (o, rm_env sub.expr sub env e)
+    | Cfk_virtual t -> Cfk_virtual ( rm_env sub.typ sub env t)
 
   let map_field sub env {pcf_desc = desc; pcf_loc = loc; pcf_attributes = attrs} =
     let open Cf in
@@ -497,15 +504,15 @@ module CE = struct
       | Pcf_method (s, p, k) ->
          method_ ~loc ~attrs (map_loc sub env s) p (map_kind sub env k)
       | Pcf_constraint (t1, t2) ->
-         constraint_ ~loc ~attrs (snd @@ sub.typ sub env t1) (snd @@ sub.typ sub env t2)
-      | Pcf_initializer e -> initializer_ ~loc ~attrs (snd @@ sub.expr sub env e)
+         constraint_ ~loc ~attrs (rm_env sub.typ sub env t1) (rm_env sub.typ sub env t2)
+      | Pcf_initializer e -> initializer_ ~loc ~attrs (rm_env sub.expr sub env e)
       | Pcf_attribute x -> attribute ~loc (try_ x @@ sub.attribute sub env)
       | Pcf_extension x -> extension ~loc ~attrs (sub.extension sub env x)
     )
       
   let map_structure sub env {pcstr_self; pcstr_fields} =
     {
-      pcstr_self = snd @@ sub.pat sub env pcstr_self;
+      pcstr_self = rm_env sub.pat sub env pcstr_self;
       pcstr_fields = thread (sub.class_field sub) env pcstr_fields;
     }
 
@@ -531,7 +538,7 @@ let value_description
       {pval_name; pval_type; pval_prim; pval_loc; pval_attributes} =
         Val.mk
           (map_loc this env pval_name)
-          (snd @@ this.typ this env pval_type)
+          (rm_env this.typ this env pval_type)
           ~attrs:(this.attributes this env pval_attributes)
           ~loc:(this.location this env pval_loc)
           ~prim:pval_prim
@@ -629,8 +636,8 @@ let default_mapper =
        env,
        Some (
            Vb.mk
-             ( snd @@ this.pat this env pvb_pat)
-             ( snd @@ this.expr this env pvb_expr)
+             ( rm_env this.pat this env pvb_pat)
+             ( rm_env this.expr this env pvb_expr)
              ~loc:(this.location this env pvb_loc)
              ~attrs:(this.attributes this env pvb_attributes)
 	 )
@@ -643,7 +650,7 @@ let default_mapper =
         Type.constructor
           (map_loc this env pcd_name)
           ~args:(T.map_constructor_arguments this env pcd_args)
-          ?res:(pcd_res |>? this.typ this env |>? snd )
+          ?res:(pcd_res |>? rm_env this.typ this env )
           ~loc:(this.location this env pcd_loc)
           ~attrs:(this.attributes this env pcd_attributes)
       );
@@ -653,7 +660,7 @@ let default_mapper =
        env,
          Type.field
            (map_loc this env pld_name)
-           (snd @@ this.typ this env pld_type)
+           (rm_env this.typ this env pld_type)
            ~mut:pld_mutable
            ~loc:(this.location this env pld_loc)
            ~attrs:(this.attributes this env pld_attributes)
@@ -665,9 +672,9 @@ let default_mapper =
        env,
        Some
          {
-           pc_lhs = snd @@ this.pat this env pc_lhs;
-           pc_guard = pc_guard |>? this.expr this env |>? snd;
-           pc_rhs = snd @@ this.expr this env pc_rhs;
+           pc_lhs = rm_env this.pat this env pc_lhs;
+           pc_guard = pc_guard |>? rm_env this.expr this env;
+           pc_rhs = rm_env this.expr this env pc_rhs;
          }
       );
 
@@ -681,8 +688,8 @@ let default_mapper =
     payload =
       (fun this env-> function
          | PStr x -> PStr (this.structure this env x)
-         | PTyp x -> PTyp ( snd @@this.typ this env x)
-         | PPat (x, g) -> PPat ( snd @@ this.pat this env  x, g |>? this.expr this env |>? snd)
+         | PTyp x -> PTyp ( rm_env this.typ this env x)
+         | PPat (x, g) -> PPat ( rm_env this.pat this env  x, g |>? rm_env this.expr this env)
       );
   }
 
