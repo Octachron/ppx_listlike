@@ -8,6 +8,12 @@ type 'a loc = 'a Loc.loc
 
 let ppf = Format.err_formatter
 
+let fold_map (|+>) map start l =
+  List.fold_left
+    (fun acc x -> acc |+> map x )
+    start
+    l
+	    
 type kind = List | Array | String | Bigarray
 	    
 module Cons = struct	    
@@ -127,10 +133,81 @@ let replace_constr cons lid=
   | Lident "[]" -> { lid with txt = Lident cons.nil }
   | _ -> lid
 
-module Expr = struct
+module Interpreter = struct
+
+type microtype = Kind of kind | Constructor of string
+    
+let var pat = match pat.ppat_desc with
+  | Ppat_var {Loc.txt;loc} -> txt
+  | _ -> assert false
+
+let const_string e= match e.pexp_desc with
+  | Pexp_constant ( Asttypes.Const_string(s, _ ) ) -> s
+  | _ -> assert false
+
+let constructor e = match e.pexp_desc with
+  | Pexp_construct(llid,None) -> llid.Loc.txt
+  | _ -> assert false
+
+let kind = function
+  | Lid.Lident x -> (
+    match x with
+    | "List"-> List
+    | "Array" -> Array
+    | "String" -> String
+    | "Bigarray" -> Bigarray
+    | _ -> assert false
+  )
+  | _ -> assert false
+		
+let field (llid,e) =
+  let open Lid in
+  match llid.Loc.txt with
+  | Lident "kind" -> "kind" , Kind( kind @@ constructor e )
+  | Lident ("cons" as s) | Lident ("nil" as s)  -> s, Constructor(const_string e)
+  | _ -> assert false
+
+let destruct_kind = function
+  | Kind k -> k
+  |  _ -> assert false 
+
+let destruct_cons = function
+  | Constructor c -> c
+  | _ -> assert false
+		     
+let reconstruct named =
+  let find x = Defs.find x named in
+  let find_cons x = destruct_cons @@ find x in
+  let kind, cons, nil =
+    destruct_kind @@ find "kind",
+    find_cons "cons",
+    find_cons "nil" in
+  Cons.{ kind; cons; nil }
+		
+let record e = match e.pexp_desc with
+  | Pexp_record (l, None ) ->
+     let open Defs in
+     let named = fold_map (|+>) field empty l in
+     reconstruct named  
+  | _ -> assert false
+	   
+    
+let binding b =
+    var b.pvb_pat,
+    record b.pvb_expr
+	   
+end
+	   
+	   
+module Expr = struct    
     let ppx_interpreter mapper env expr =
-      rm_env mapper.expr mapper env expr	   
-	     
+      let open Defs in 
+      match expr.pexp_desc with
+      | Pexp_let (Asttypes.Nonrecursive, bindings, e ) ->
+	 let defs =
+	  fold_map (|+>) Interpreter.binding Env.(env.defs) bindings in
+	 rm_env mapper.expr mapper Env.{ env with defs } e
+      | _ -> assert false
 	     
     let extract  = function
       | PStr [ {pstr_desc = Pstr_eval (expr, _) ; _ } ] -> Some expr

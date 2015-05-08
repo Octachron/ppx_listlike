@@ -13,13 +13,22 @@ type ('a,_) t =
 let rec iter: type z r. ('a->unit) -> ('a,z->r) t -> unit = fun f -> function
   | [%ll? a::l] -> f a; iter f l
   | [%ll? [] ] -> ()
-			       
+
+		    
 let l =[%ll[1;2;3;4]];;
 
 let%ll l2 = [5;6;7;8];;  
 
 let l3 = [10]  
-  
+
+let print_list l = 
+  Format.printf "@[%a@]\n" (fun ppf -> iter @@ Format.fprintf ppf "%d@;") l
+
 let () =
-  Format.printf "@[%a@]\n" (fun ppf -> iter @@ Format.fprintf ppf "%d@;") l2 ;
+  let%ppx_listlike nl = { kind=List; cons="Cons"; nil="Nil" } in
+  let%nl l = [-1;-2;-4] in
+  print_list l
+		
+let () =
   Format.printf "@[%a@]\n" (fun ppf -> List.iter @@ Format.fprintf ppf "%d@;") l3 ;
+  print_list l2
