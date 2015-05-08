@@ -562,7 +562,7 @@ let module_type_declaration
     
 	  
 	      
-let default_mapper =
+let identity =
   {
     structure = (fun this env l -> thread_opt (this.structure_item this) env l);
     structure_item = M.map_structure_item;
