@@ -313,9 +313,19 @@ let case mapper env case =
 				 
 
 module Str = struct
+
+    let fold_binding defs item =
+      match item.pstr_desc with
+      | Pstr_value(Asttypes.Nonrecursive, bindings) ->
+	 fold_map Defs.(|+>) Interpreter.binding defs bindings
+      | _ -> assert false
+    
     let ppx_interpreter mapper env str =
-      mapper.structure mapper env str	   
-	     
+      let open Defs in
+      let defs =
+	List.fold_left fold_binding Env.(env.defs) str in
+      Env.{env with defs}, []
+   	     
 	     
     let extract  = function
       | PStr str -> Some str

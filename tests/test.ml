@@ -14,8 +14,10 @@ let rec iter: type z r. ('a->unit) -> ('a,z->r) t -> unit = fun f -> function
   | [%ll? a::l] -> f a; iter f l
   | [%ll? [] ] -> ()
 
+let%ppx_listlike longname = { kind = List; cons = "Cons"; nil="Nil" } 
 		    
-let l =[%ll[1;2;3;4]];;
+		    
+let l =[%longname[1;2;3;4]];;
 
 let%ll l2 = [5;6;7;8];;  
 
