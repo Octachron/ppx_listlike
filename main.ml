@@ -118,7 +118,7 @@ module Opt = struct
 open Opt		  
          		 
 
-let expr_constr cons lid=
+let replace_constr cons lid=
   let open Loc in
   let open Lid in
   let open Cons in
@@ -127,8 +127,13 @@ let expr_constr cons lid=
   | Lident "[]" -> { lid with txt = Lident cons.nil }
   | _ -> lid
 
+module Expr = struct
 
-module Expr = struct	   
+
+
+
+
+    
     let ppx_interpreter mapper env expr =
       rm_env mapper.expr mapper env expr	   
 	     
@@ -157,12 +162,49 @@ let expr mapper env expr =
   let open Env in
   match expr.pexp_desc with
   | Pexp_construct (lid, expr_opt) ->
-     let lid =  Opt.may expr_constr (find_opt List env.status) lid
+     let lid =  Opt.may replace_constr (find_opt List env.status) lid
      and expr_opt = expr_opt |>? rm_env mapper.expr mapper env in
      env, { expr with pexp_desc = Pexp_construct( lid, expr_opt) }
   | Pexp_extension ext -> env, Expr.extension mapper env expr ext
   | _ -> Env_mapper.identity.expr mapper env expr 
 
+module Pat = struct	   
+    let ppx_interpreter mapper env pat =
+      rm_env mapper.pat mapper env pat
+	        
+    let extract = function
+      | PPat (pat,None) -> Some (pat)
+      | _ -> None
+	       
+    let extension mapper env super (name, payload) =
+      let open Env in
+      let open Loc in
+      match name.txt, extract payload with
+      | "ppx_listlike", Some pat -> ppx_interpreter mapper env pat
+      | s, Some (pat) -> (
+	try
+	  let cons = Defs.find s env.defs in
+	  let env = activate env cons in
+	  rm_env mapper.pat mapper env pat
+	with Not_found -> super
+      )
+      | _ -> super
+  end
+		
+	 
+let pat mapper env pat =
+  let open Status in
+  let open Env in
+  match pat.ppat_desc with
+  | Ppat_construct (lid, pat_opt) ->
+     let lid =  Opt.may replace_constr (find_opt List env.status) lid
+     and pat_opt = pat_opt |>? rm_env mapper.pat mapper env in
+     env, { pat with ppat_desc = Ppat_construct( lid, pat_opt) }
+  | Ppat_extension ext -> env, Pat.extension mapper env pat ext
+  | _ -> Env_mapper.identity.pat mapper env pat 
+
+
+				  
 
 (*		      
 let uniformize_args kind mapper loc  =
@@ -214,7 +256,8 @@ let listlike_mapper argv =
   to_transform Env.default
 	       { 
 		 identity  with
-		 expr
+		 expr;
+		 pat
 	       }
 
 let () = Ppx_register.register "listlike" listlike_mapper

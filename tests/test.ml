@@ -11,8 +11,8 @@ type ('a,_) t =
   | Nil : ('a, 'base -> 'base ) t
 	    
 let rec iter: type z r. ('a->unit) -> ('a,z->r) t -> unit = fun f -> function
-  | Cons(a,l) -> f a; iter f l
-  | Nil -> ()
+  | [%ll? a::l] -> f a; iter f l
+  | [%ll?[]] -> ()
 			       
 let l =[%ll[1;2;3;4]];;
 
