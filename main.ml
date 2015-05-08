@@ -198,6 +198,42 @@ let pat mapper env pat =
   | _ -> Env_mapper.identity.pat mapper env pat 
 
 
+module Case = struct	   
+    let ppx_interpreter mapper env case =
+      rm_env mapper.case mapper env case
+	        
+    let extract = function
+      | PPat (pat,guard) -> Some (pat,guard)
+      | _ -> None
+	       
+    let extension mapper env super (name, payload) =
+      let open Env in
+      let open Loc in
+      match name.txt, extract payload with
+      | "ppx_listlike", Some (pc_lhs,pc_guard) ->
+	 let case = {super with pc_lhs ;pc_guard} in
+	 ppx_interpreter mapper env case
+      | s, Some (pat,guard) -> (
+	try
+	  let cons = Defs.find s env.defs in
+	  let env = activate env cons in
+	  let pc_lhs = rm_env mapper.pat mapper env pat in
+	  let pc_guard = guard |>? rm_env mapper.expr mapper env in
+	  Some {super with pc_lhs; pc_guard }
+	with Not_found -> Some super
+      )
+      | _ -> Some super
+  end
+		
+	 
+let case mapper env case =
+  let open Status in
+  let open Env in
+  match case.pc_lhs.ppat_desc with
+  | Ppat_extension ext -> env, Case.extension mapper env case ext
+  | _ -> Env_mapper.identity.case mapper env case 
+
+				 
 
 module Str = struct
     let ppx_interpreter mapper env str =
@@ -243,6 +279,7 @@ let structure mapper env =
 	  q
 				 
 
+	  
 (*		      
 let uniformize_args kind mapper loc  =
   function
@@ -295,7 +332,8 @@ let listlike_mapper argv =
 		 identity  with
 		 expr;
 		 pat;
-		 structure
+		 structure;
+		 case
 	       }
 
 let () = Ppx_register.register "listlike" listlike_mapper
