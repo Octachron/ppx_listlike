@@ -128,12 +128,6 @@ let replace_constr cons lid=
   | _ -> lid
 
 module Expr = struct
-
-
-
-
-
-    
     let ppx_interpreter mapper env expr =
       rm_env mapper.expr mapper env expr	   
 	     
@@ -204,7 +198,50 @@ let pat mapper env pat =
   | _ -> Env_mapper.identity.pat mapper env pat 
 
 
-				  
+
+module Str = struct
+    let ppx_interpreter mapper env str =
+      mapper.structure mapper env str	   
+	     
+	     
+    let extract  = function
+      | PStr str -> Some str
+      | _ -> None
+	       
+    let extension mapper env super (name, payload) =
+      let open Env in
+      let open Loc in
+      match name.txt, extract payload with
+      | "ppx_listlike", Some str -> ppx_interpreter mapper env str
+      | s, Some str -> (
+	try
+	  let cons = Defs.find s env.defs in
+	  mapper.structure mapper (activate env cons) str 
+	with Not_found -> env, [super]
+      )
+      | _ -> env, [super]
+  end
+			 
+let structure mapper env =
+  let open Status in
+  let open Env in
+  function
+  | [] -> env, []
+  | item::q ->
+     let q env = mapper.structure mapper env q in
+     match item.pstr_desc with
+     | Pstr_extension (ext,attributes) ->
+	let env', str = Str.extension mapper env item ext in
+	let env = {env with defs = env'.defs } in
+	let env, q = q env in
+	env, str @ q
+     | _ ->
+	let env', q = q env in
+	env',
+	cons_opt
+	  (rm_env Env_mapper.identity.structure_item mapper env item)
+	  q
+				 
 
 (*		      
 let uniformize_args kind mapper loc  =
@@ -257,7 +294,8 @@ let listlike_mapper argv =
 	       { 
 		 identity  with
 		 expr;
-		 pat
+		 pat;
+		 structure
 	       }
 
 let () = Ppx_register.register "listlike" listlike_mapper

@@ -38,9 +38,9 @@ type 'env t = {
   open_description: 'env t -> 'env -> open_description -> open_description;
   pat: 'env t -> 'env -> pattern -> 'env * pattern;
   payload: 'env t -> 'env -> payload -> payload;
-  signature: 'env t -> 'env -> signature -> signature;
+  signature: 'env t -> 'env -> signature -> 'env * signature;
   signature_item: 'env t -> 'env -> signature_item -> 'env * signature_item option;
-  structure: 'env t -> 'env -> structure -> structure;
+  structure: 'env t -> 'env -> structure -> 'env * structure;
   structure_item: 'env t -> 'env -> structure_item -> 'env * structure_item option;
   typ: 'env t -> 'env -> core_type -> 'env * core_type;
   type_declaration: 'env t -> 'env -> type_declaration -> 'env * type_declaration;
@@ -113,7 +113,15 @@ let thread_opt f env l =
   in
   let env,l = List.fold_left folder (env,[]) l in
   List.rev l 
-					
+
+let thread_opt_env f env l =
+  let folder (env,l) x =
+    let env, opt_x = f env x in
+    env, cons_opt opt_x l
+  in
+  let env,l = List.fold_left folder (env,[]) l in
+  env,List.rev l 
+	   
 module T = struct
   (* Type expressions for the core language *)
 
@@ -259,7 +267,7 @@ module MT = struct
     let mt = match desc with
       | Pmty_ident s -> ident ~loc ~attrs (map_loc sub env s)
       | Pmty_alias s -> alias ~loc ~attrs (map_loc sub env s)
-      | Pmty_signature sg -> signature ~loc ~attrs (sub.signature sub env sg)
+      | Pmty_signature sg -> signature ~loc ~attrs (rm_env sub.signature sub env sg)
       | Pmty_functor (s, mt1, mt2) ->
          functor_ ~loc ~attrs (map_loc sub env s)
 		  ( mt1 |>? (sub.module_type sub env) )
@@ -314,7 +322,7 @@ module M = struct
     let attrs = sub.attributes sub env attrs in
     match desc with
     | Pmod_ident x -> ident ~loc ~attrs (map_loc sub env x)
-    | Pmod_structure str -> structure ~loc ~attrs (sub.structure sub env str)
+    | Pmod_structure str -> structure ~loc ~attrs (rm_env sub.structure sub env str)
     | Pmod_functor (arg, arg_ty, body) ->
         functor_ ~loc ~attrs (map_loc sub env arg)
           ( arg_ty |>? sub.module_type sub env )
@@ -564,10 +572,10 @@ let module_type_declaration
 	      
 let identity =
   {
-    structure = (fun this env l -> thread_opt (this.structure_item this) env l);
+    structure = (fun this env l -> thread_opt_env (this.structure_item this) env l);
     structure_item = M.map_structure_item;
     module_expr = M.map;
-    signature = (fun this env l -> thread_opt (this.signature_item this) env l);
+    signature = (fun this env l -> thread_opt_env (this.signature_item this) env l);
     signature_item = MT.map_signature_item;
     module_type = MT.map;
     with_constraint = MT.map_with_constraint;
@@ -687,7 +695,7 @@ let identity =
     attributes = (fun this env l -> thread_opt (this.attribute this) env l);
     payload =
       (fun this env-> function
-         | PStr x -> PStr (this.structure this env x)
+         | PStr x -> PStr (rm_env this.structure this env x)
          | PTyp x -> PTyp ( rm_env this.typ this env x)
          | PPat (x, g) -> PPat ( rm_env this.pat this env  x, g |>? rm_env this.expr this env)
       );
@@ -695,7 +703,9 @@ let identity =
 
 let to_transform env env_mapper =
   Ppx_register.{
-      implem = (fun structure -> env_mapper.structure env_mapper env structure);
-      iface = (fun signature -> env_mapper.signature env_mapper env signature);
+      implem = (fun structure ->
+		rm_env env_mapper.structure env_mapper env structure);
+      iface = (fun signature ->
+	       rm_env env_mapper.signature env_mapper env signature);
   }
     

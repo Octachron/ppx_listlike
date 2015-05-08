@@ -12,10 +12,14 @@ type ('a,_) t =
 	    
 let rec iter: type z r. ('a->unit) -> ('a,z->r) t -> unit = fun f -> function
   | [%ll? a::l] -> f a; iter f l
-  | [%ll?[]] -> ()
+  | [%ll? [] ] -> ()
 			       
 let l =[%ll[1;2;3;4]];;
 
-  
-let () = Format.printf "@["; iter (Format.printf "%d@;") l ; Format.printf"@]\n"
+let%ll l2 = [5;6;7;8];;  
 
+let l3 = [10]  
+  
+let () =
+  Format.printf "@[%a@]\n" (fun ppf -> iter @@ Format.fprintf ppf "%d@;") l2 ;
+  Format.printf "@[%a@]\n" (fun ppf -> List.iter @@ Format.fprintf ppf "%d@;") l3 ;
