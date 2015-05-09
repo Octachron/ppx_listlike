@@ -5,7 +5,13 @@ module Lid = Longident
 open Env_mapper
 type 'a loc = 'a Loc.loc
 		 
+type lid = Lid.t =
+      | Lident of string
+      | Ldot of  lid * string
+      | Lapply of lid * lid 
 
+let ghost loc_a = Loc.{ loc_a with loc_ghost = true } 
+			  
 let ppf = Format.err_formatter
 
 let fold_map (|+>) map start l =
@@ -19,7 +25,10 @@ type kind = List | Array | String | Bigarray
 module Cons = struct	    
     type t = { kind:kind; cons: string; nil: string}
     let default = "ll", { kind=List; cons="Cons"; nil="Nil" }
+   		  
   end
+let nil c = c.Cons.nil
+let cons c = c.Cons.cons
 		
 module Defs =
   struct 
@@ -63,33 +72,46 @@ module Env = struct
 		       
     let default = define empty Cons.default 
   end
-(*
-let array_env =
-  Indices.(
-    empty
-    |+> (Array, {cons="Cons_array"; nil= "Nil_array"})
-    |+> (String, {cons="Cons_string"; nil= "Nil_string"})
-    |+> (Bigarray, {cons="Cons_bigarray"; nil= "Nil_bigarray"})
-  )
 
-	       
-let identify_array_kind lid =
-  let open Lid in
+
+module Array_indices = struct
+
+    let map_2_2 ~lbl f g= function
+      | [l1,e1;l2,e2] -> [lbl l1, f e1; lbl l2, g e2]
+      | l -> l
+
+    let map_2_3 ~lbl f g = function
+      | [l1,e1;l2,e2;l3,e3] -> [lbl l1, f e1;lbl l2, g e2; lbl l3, f e3]
+      | l -> l
+	
+let identify_lid lid =
   match lid with
-  | Lident (".()" | ".()<-")
-  | Ldot( Lident "Array", ("get"|"set"|"unsafe_set"|"unsafe_get") ) ->
-     Some Array
-  | Lident (".[]" | ".[]<-")
-  | Ldot(Lident "String", ("get"|"set"|"unsafe_set"|"unsafe_get") ) ->
-     Some String
-  | Lident (".{}" | ".{}<-")
-  | Ldot(
-	Ldot ( Lident "Bigarray", "Array1" ),
-	("get"|"set"|"unsafe_set"|"unsafe_get")
-      )  ->
-     Some Bigarray
-  | _ -> None 
- *)
+  | Lident ".()" 
+  | Ldot( Lident "Array", ("get"|"unsafe_get") )
+    -> Some (Array, map_2_2)
+  | Lident ".()<-"
+  | Ldot( Lident "Array", ("set"|"unsafe_set") )
+    -> Some (Array, map_2_3) 
+  | Lident ".[]" 
+  | Ldot( Lident "String", ("get"|"unsafe_get") ) ->
+     Some (String, map_2_2)
+  | Lident ".[]<-"
+  | Ldot( Lident "String", ("set"|"unsafe_set") )
+    -> Some (String, map_2_3) 
+  | Lident ".{}" 
+  | Ldot( Ldot ( Lident "Bigarray", "Array1" ) , ("get"|"unsafe_get") ) ->
+     Some (Bigarray, map_2_2)
+  | Lident ".{}<-"
+  | Ldot( Ldot ( Lident "Bigarray", "Array1" ), ("set"|"unsafe_set") )
+    -> Some (Bigarray, map_2_3)
+  | _ -> None
+
+let identify exp =
+  match exp.pexp_desc with
+  | Pexp_ident lid -> identify_lid lid.Loc.txt
+  | _ -> None
+
+end	   
 
 module Opt = struct
     
@@ -197,7 +219,31 @@ let binding b =
     record b.pvb_expr
 	   
 end
-	   
+
+module Expr_seq = struct
+    
+    let mk_nil cons nil_loc =
+      let loc = ghost nil_loc in
+      let lid =Loc.{txt = Lident (nil cons) ; loc } in
+      H.Exp.construct ~loc lid None
+
+    let mk_cons cons loc e1 e2 =
+      let loc = ghost loc in
+      let constr = Loc.{txt = Lident cons.Cons.cons; loc} in
+      let tuple = H.Exp.tuple ~loc [e1;e2] in
+      H.Exp.construct ~loc constr (Some tuple) 
+	
+    let rec mk_list cons mapper env exp=
+      match exp.pexp_desc with
+      | Pexp_sequence (e1,e2 ) ->
+	 let e1 = rm_env mapper.expr mapper env e1 in
+	 mk_cons cons exp.pexp_loc e1 @@  mk_list cons mapper env e2
+      | _ ->
+	 let exp = rm_env mapper.expr mapper env exp in
+	 let nil = mk_nil cons Loc.none in
+	 mk_cons cons exp.pexp_loc exp nil
+  end
+		       
 	   
 module Expr = struct    
     let ppx_interpreter mapper env expr =
@@ -236,6 +282,21 @@ let expr mapper env expr =
      let lid =  Opt.may replace_constr (find_opt List env.status) lid
      and expr_opt = expr_opt |>? rm_env mapper.expr mapper env in
      env, { expr with pexp_desc = Pexp_construct( lid, expr_opt) }
+  | Pexp_apply (f, args) ->
+     let f = rm_env mapper.expr mapper env f in
+     env,
+     Array_indices.identify f
+     >>=? (fun (kind,arg_map) ->Status.find_opt kind Env.(env.status)
+     |>? ( fun cons ->
+	 H.Exp.apply ~loc:expr.pexp_loc f @@
+	   arg_map
+	     ~lbl:(fun x -> x)
+	     (rm_env mapper.expr mapper env)
+	     (Expr_seq.mk_list cons mapper env)
+	     args
+	 )
+	  )
+     ><? rm_env Env_mapper.identity.expr mapper env expr
   | Pexp_extension ext -> env, Expr.extension mapper env expr ext
   | _ -> Env_mapper.identity.expr mapper env expr 
 
