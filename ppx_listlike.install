@@ -1,0 +1,2 @@
+bin: ["ppx_listlike"]
+lib: ["META"]
