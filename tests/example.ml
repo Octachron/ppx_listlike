@@ -5,8 +5,8 @@ let nested_list = [%ll [1234; [%stdl[1;2;3;4]]; 2; [%stdl[2]] ]]
 
 (* map : ('a,'b) t -> ('a->'c) -> ('b->'d) -> ('c,'d) t *)
 let rec map f g = function
-  | [%ll? a::q ] -> Cons(f a, map g f q)
-  | [%ll? [] ] -> Nil
+  | [%ll? a::q ] -> [%ll (f a) :: map g f q ]
+  | [%ll? [] ] -> [%ll [] ]
 
 (* map : ('a,'b) t -> ('a->'c) -> ('b->'d) -> ('c,'d) t *)
 let rec map f g =[%ll function

@@ -384,10 +384,11 @@ module Case = struct
       | s, Some (pat,guard) -> (
 	try
 	  let constr = Defs.find s env.defs in
+	  let pc_rhs = rm_env mapper.expr mapper env super.pc_rhs in
 	  let env = activate constr env in
 	  let pc_lhs = rm_env mapper.pat mapper env pat in
 	  let pc_guard = guard |>? rm_env mapper.expr mapper env in
-	  Some {super with pc_lhs; pc_guard }
+	  Some {pc_lhs; pc_guard; pc_rhs}
 	with Not_found -> Some super
       )
       | _ -> Some super
