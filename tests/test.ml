@@ -25,7 +25,7 @@ module Nlist = struct
 open Nlist
        
 module Std_array = Array
-module Array = struct
+module String = struct
   type ('dim,'elt) t = (int,'dim) Nlist.t * 'elt array
   let make shape elt =
     let len = Nlist.fold ( * ) 1 shape in
@@ -42,13 +42,15 @@ module Array = struct
   let get (sh,array) indices =
     Std_array.get array @@ flat_indice 1 0 indices sh
 					     
-end
+  end
 
-let%ppx_listlike md_array = { kind = Array; cons = "Cons"; nil = "Nil" } 
+module MdA=String 		  
 
-let a  = Array.make [%ll[2;3;4]] 3
+let%ppx_listlike md = { kind = String_indices; cons = "Cons"; nil = "Nil" } 
 
-let n = [%md_array a.(1;2;3) ];;		    
+let a  = MdA.make [%ll[2;3;4]] 3
+
+let n = [%md a.[1;2;3] ];;		    
 
 		    
 	    

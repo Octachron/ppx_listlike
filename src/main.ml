@@ -19,16 +19,17 @@ let fold_map (|+>) map start l =
     (fun acc x -> acc |+> map x )
     start
     l
+    
+type kind = List | Array_indices | Bigarray_indices | String_indices 
 	    
-type kind = List | Array | String | Bigarray
-	    
-module Cons = struct	    
+module Constructor = struct	    
     type t = { kind:kind; cons: string; nil: string}
     let default = "ll", { kind=List; cons="Cons"; nil="Nil" }
-   		  
   end
-let nil c = c.Cons.nil
-let cons c = c.Cons.cons
+
+		       
+let nil c = c.Constructor.nil
+let cons c = c.Constructor.cons
 		
 module Defs =
   struct 
@@ -37,6 +38,7 @@ module Defs =
 		  type t = string
 		  let compare (x:string) y = compare x y
 		end)
+    type st = Constructor.t t
     let (|+>) env (key,value) = add key value env 		  
   end
 
@@ -47,9 +49,9 @@ module Status = struct
 		  let compare (x:kind) y = compare x y
 		end)
 
-    type st = Cons.t t 
+    type st = Constructor.t t 
     let (|+>) env constr =
-      let open Cons in add constr.kind constr env
+      let open Constructor in add constr.kind constr env
     let find_opt kind status =
       try Some (find kind status) with
       | Not_found -> None 
@@ -58,23 +60,25 @@ end
 		      
 module Env = struct
     type t = {
-	defs: Cons.t Defs.t;
+	defs: Defs.st;
 	status: Status.st
       }
 	       
 	   
     let empty = { defs = Defs.empty; status=Status.empty }	     
-    let define ~env ~def =
+    let define def env =
       { env with defs = Defs.( env.defs |+> def ) }
-    let activate ~env ~cons =
+    let activate cons env =
       { env with status = Status.( env.status |+> cons )}   
 				      
 		       
-    let default = define empty Cons.default 
+    let default =
+      empty
+      |> define Constructor.default
   end
 
 
-module Array_indices = struct
+module Indices = struct
 
     let map_2_2 ~lbl f g= function
       | [l1,e1;l2,e2] -> [lbl l1, f e1; lbl l2, g e2]
@@ -88,22 +92,22 @@ let identify_lid lid =
   match lid with
   | Lident ".()" 
   | Ldot( Lident "Array", ("get"|"unsafe_get") )
-    -> Some (Array, map_2_2)
+    -> Some (Array_indices, map_2_2)
   | Lident ".()<-"
   | Ldot( Lident "Array", ("set"|"unsafe_set") )
-    -> Some (Array, map_2_3) 
+    -> Some (Array_indices, map_2_3) 
   | Lident ".[]" 
   | Ldot( Lident "String", ("get"|"unsafe_get") ) ->
-     Some (String, map_2_2)
+     Some (String_indices, map_2_2)
   | Lident ".[]<-"
   | Ldot( Lident "String", ("set"|"unsafe_set") )
-    -> Some (String, map_2_3) 
+    -> Some (String_indices, map_2_3) 
   | Lident ".{}" 
   | Ldot( Ldot ( Lident "Bigarray", "Array1" ) , ("get"|"unsafe_get") ) ->
-     Some (Bigarray, map_2_2)
+     Some (Bigarray_indices, map_2_2)
   | Lident ".{}<-"
   | Ldot( Ldot ( Lident "Bigarray", "Array1" ), ("set"|"unsafe_set") )
-    -> Some (Bigarray, map_2_3)
+    -> Some (Bigarray_indices, map_2_3)
   | _ -> None
 
 let identify exp =
@@ -149,7 +153,7 @@ open Opt
 let replace_constr cons lid=
   let open Loc in
   let open Lid in
-  let open Cons in
+  let open Constructor in
   match lid.txt with
   | Lident "::" ->  { lid with txt = Lident cons.cons }
   | Lident "[]" -> { lid with txt = Lident cons.nil }
@@ -175,9 +179,9 @@ let kind = function
   | Lid.Lident x -> (
     match x with
     | "List"-> List
-    | "Array" -> Array
-    | "String" -> String
-    | "Bigarray" -> Bigarray
+    | "Array_indices" -> Array_indices
+    | "String_indices" -> String_indices
+    | "Bigarray_indices" -> Bigarray_indices
     | _ -> assert false
   )
   | _ -> assert false
@@ -204,7 +208,7 @@ let reconstruct named =
     destruct_kind @@ find "kind",
     find_cons "cons",
     find_cons "nil" in
-  Cons.{ kind; cons; nil }
+  Constructor.{ kind; cons; nil }
 		
 let record e = match e.pexp_desc with
   | Pexp_record (l, None ) ->
@@ -222,14 +226,14 @@ end
 
 module Expr_seq = struct
     
-    let mk_nil cons nil_loc =
+    let mk_nil constr nil_loc =
       let loc = ghost nil_loc in
-      let lid =Loc.{txt = Lident (nil cons) ; loc } in
+      let lid =Loc.{txt = Lident (nil constr) ; loc } in
       H.Exp.construct ~loc lid None
 
-    let mk_cons cons loc e1 e2 =
+    let mk_cons constr loc e1 e2 =
       let loc = ghost loc in
-      let constr = Loc.{txt = Lident cons.Cons.cons; loc} in
+      let constr = Loc.{txt = Lident (cons constr); loc} in
       let tuple = H.Exp.tuple ~loc [e1;e2] in
       H.Exp.construct ~loc constr (Some tuple) 
 	
@@ -266,8 +270,8 @@ module Expr = struct
       | "ppx_listlike", Some expr -> ppx_interpreter mapper env expr
       | s, Some expr -> (
 	try
-	  let cons = Defs.find s env.defs in
-	  rm_env mapper.expr mapper (activate env cons) expr 
+	  let constr = Defs.find s env.defs in
+	  rm_env mapper.expr mapper (activate constr env) expr 
 	with Not_found -> super
       )
       | _ -> super
@@ -285,7 +289,7 @@ let expr mapper env expr =
   | Pexp_apply (f, args) ->
      let f = rm_env mapper.expr mapper env f in
      env,
-     Array_indices.identify f
+     Indices.identify f
      >>=? (fun (kind,arg_map) ->Status.find_opt kind Env.(env.status)
      |>? ( fun cons ->
 	 H.Exp.apply ~loc:expr.pexp_loc f @@
@@ -315,8 +319,8 @@ module Pat = struct
       | "ppx_listlike", Some pat -> ppx_interpreter mapper env pat
       | s, Some (pat) -> (
 	try
-	  let cons = Defs.find s env.defs in
-	  let env = activate env cons in
+	  let constr = Defs.find s env.defs in
+	  let env = activate constr env in
 	  rm_env mapper.pat mapper env pat
 	with Not_found -> super
       )
@@ -353,8 +357,8 @@ module Case = struct
 	 ppx_interpreter mapper env case
       | s, Some (pat,guard) -> (
 	try
-	  let cons = Defs.find s env.defs in
-	  let env = activate env cons in
+	  let constr = Defs.find s env.defs in
+	  let env = activate constr env in
 	  let pc_lhs = rm_env mapper.pat mapper env pat in
 	  let pc_guard = guard |>? rm_env mapper.expr mapper env in
 	  Some {super with pc_lhs; pc_guard }
@@ -399,8 +403,8 @@ module Str = struct
       | "ppx_listlike", Some str -> ppx_interpreter mapper env str
       | s, Some str -> (
 	try
-	  let cons = Defs.find s env.defs in
-	  mapper.structure mapper (activate env cons) str 
+	  let constr = Defs.find s env.defs in
+	  mapper.structure mapper (activate constr env) str 
 	with Not_found -> env, [super]
       )
       | _ -> env, [super]
@@ -425,55 +429,7 @@ let structure mapper env =
 	cons_opt
 	  (rm_env Env_mapper.identity.structure_item mapper env item)
 	  q
-				 
-
-	  
-(*		      
-let uniformize_args kind mapper loc  =
-  function
-  | arg1::(lbl,seq)::q ->
-     let constr = Indices.find kind array_env in
-     arg1::(
-       lbl,
-       mk_list
-	 ( fun loc -> loc)
-	 { expr with destruct = seq_destruct }
-	 false
-	 constr
-	 Loc.{ loc with loc_start = loc.loc_end }
-	 mapper
-	 seq
-     )::q
-  | args -> args
- *)  
-(*		
-let expression_map mapper exp =
-  let default () = default_mapper.expr mapper exp in
-  match exp.pexp_desc with
-  | Pexp_constant const -> quoted_string expr mapper exp exp.pexp_loc const
-  | Pexp_extension ({Loc.txt="listlike"; _ }, PStr l) ->
-     List.iter extension_iter l;
-     { exp with pexp_desc = unit exp.pexp_loc }
-  | Pexp_sequence (e1,e2) ->
-     let e1' = mapper.expr mapper e1 in
-     { exp with pexp_desc = Pexp_sequence (e1', mapper.expr mapper e2 ) }
-  | Pexp_apply (f, args ) ->
-     begin
-       match f.pexp_desc with
-       | Pexp_ident ident ->
-	  ( match identify_array_kind ident.Loc.txt with
-	    | Some kind ->
-	       let loc = exp.pexp_loc in
-	       { f with pexp_desc =
-			  Pexp_apply( f, uniformize_args kind mapper loc args )
-	       }
-	    | None -> default ()
-	  )
-      | _ -> default ()
-    end 
-  | _ -> default ()
- *)
-    			       
+  
 let listlike_mapper argv =
   to_transform Env.default
 	       { 

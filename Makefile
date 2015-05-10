@@ -3,11 +3,11 @@ ppx_listlike:main.native
 
 all: ppx_listlike tests/test.native
 
-main.native:main.ml
+main.native:src/main.ml
 	ocamlbuild -pkg compiler-libs.common main.native
 
-tests/test.native: tests/test.ml main.ml
-	ocamlbuild -cflags -ppx,"../ppx_listlike"  tests/test.native
+tests/test.native: tests/test.ml src/main.ml
+	ocamlbuild -cflags -ppx,"../ppx_listlike"  test.native
 
 clean:
 	ocamlbuild -clean
