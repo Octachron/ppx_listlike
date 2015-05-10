@@ -25,6 +25,7 @@ type kind = List | Array_indices | Bigarray_indices | String_indices
 module Constructor = struct	    
     type t = { kind:kind; cons: string; nil: string}
     let default = "ll", { kind=List; cons="Cons"; nil="Nil" }
+    let std = "stdl", { kind=List; cons="::"; nil="[]" } 
   end
 
 		       
@@ -75,6 +76,7 @@ module Env = struct
     let default =
       empty
       |> define Constructor.default
+      |> define Constructor.std
   end
 
 
