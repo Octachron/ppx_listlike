@@ -80,35 +80,52 @@ module Env = struct
 
 module Indices = struct
 
-    let map_2_2 ~lbl f g= function
-      | [l1,e1;l2,e2] -> [lbl l1, f e1; lbl l2, g e2]
-      | l -> l
+    let map_2 f (a,b) = a, f b
 
-    let map_2_3 ~lbl f g = function
-      | [l1,e1;l2,e2;l3,e3] -> [lbl l1, f e1;lbl l2, g e2; lbl l3, f e3]
-      | l -> l
-	
+    let map special f g l =
+      let rec map special f g l =
+	if special <= 0 then List.map (map_2 f) l else
+	match l with
+	| a::q -> (map_2 g a)::(map (special - 1) f g q)
+	| [] -> [] in
+      match l with
+      | a::q -> (map_2 f a)::(map special f g q)
+      | [] -> []
+
+    let array_map g e = match e.pexp_desc with
+      | Pexp_array l -> { e with pexp_desc = Pexp_array (List.map g l) }
+      | _ -> e 
+		
+    let map_generic f g l =
+      map 1 f (array_map g) l
+
+	       
 let identify_lid lid =
   match lid with
-  | Lident ".()" 
-  | Ldot( Lident "Array", ("get"|"unsafe_get") )
-    -> Some (Array_indices, map_2_2)
-  | Lident ".()<-"
-  | Ldot( Lident "Array", ("set"|"unsafe_set") )
-    -> Some (Array_indices, map_2_3) 
-  | Lident ".[]" 
-  | Ldot( Lident "String", ("get"|"unsafe_get") ) ->
-     Some (String_indices, map_2_2)
-  | Lident ".[]<-"
-  | Ldot( Lident "String", ("set"|"unsafe_set") )
-    -> Some (String_indices, map_2_3) 
-  | Lident ".{}" 
-  | Ldot( Ldot ( Lident "Bigarray", "Array1" ) , ("get"|"unsafe_get") ) ->
-     Some (Bigarray_indices, map_2_2)
-  | Lident ".{}<-"
-  | Ldot( Ldot ( Lident "Bigarray", "Array1" ), ("set"|"unsafe_set") )
-    -> Some (Bigarray_indices, map_2_3)
+  | Lident (".()"|".()<-") 
+  | Ldot( Lident "Array", ("get"|"unsafe_get"|"set"|"unsafe_set") )
+    -> Some (Array_indices, map 1) 
+  | Lident (".[]"|".[]<-") 
+  | Ldot( Lident "String", ("get"|"unsafe_get"|"unsafe_set"|"set") )
+    ->  Some (String_indices, map 1)
+  | Lident (".{}"|".{}<-") 
+  | Ldot( Ldot ( Lident "Bigarray", "Array1" ) ,
+	  ("get"|"unsafe_get"|"set"|"unsafe_set") ) ->
+     Some (Bigarray_indices, map 1)
+  | Lident (".{,}"|".{,}<-") 
+  | Ldot( Ldot ( Lident "Bigarray", "Array2" ) ,
+	  ("get"|"unsafe_get"|"set"|"unsafe_set") ) ->
+     Some (Bigarray_indices, map 2)
+  | Lident (".{,,}"|".{,,}<-") 
+  | Ldot( Ldot ( Lident "Bigarray", "Array3" ) ,
+	  ("get"|"unsafe_get"|"set"|"unsafe_set") ) ->
+     Some (Bigarray_indices, map 3)
+  | Lident (".{,..,}"|".{,..,}<-") 
+  | Ldot( Ldot ( Lident "Bigarray", "Genarray" ) ,
+	  ("get"|"unsafe_get"|"set"|"unsafe_set") ) ->
+     Some (Bigarray_indices, map_generic )
   | _ -> None
+  
 
 let identify exp =
   match exp.pexp_desc with
@@ -294,8 +311,7 @@ let expr mapper env expr =
      |>? ( fun cons ->
 	 H.Exp.apply ~loc:expr.pexp_loc f @@
 	   arg_map
-	     ~lbl:(fun x -> x)
-	     (rm_env mapper.expr mapper env)
+	     (rm_env mapper.expr mapper env )
 	     (Expr_seq.mk_list cons mapper env)
 	     args
 	 )
