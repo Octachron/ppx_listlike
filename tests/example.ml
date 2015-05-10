@@ -20,5 +20,5 @@ let rec map f g =function%ll
   | [] -> []
 
 let%ppx_listlike nl = { cons="Cons_nl"; nil="Nil_nl"; kind=List }
-let%ppx_listlike mi = { cons="Cons"; nil="Nil"; kind=String_indices } 
+and mi = { cons="Cons"; nil="Nil"; kind=String_indices } 
 			

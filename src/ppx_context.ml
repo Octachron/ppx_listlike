@@ -1,4 +1,4 @@
-
+(* Forked from the compiler libs implementation *)
 module StringMap= Map.Make(String)
 
 let cookies = ref StringMap.empty
