@@ -179,36 +179,44 @@ let replace_constr cons lid=
 module Interpreter = struct
 
 type microtype = Kind of kind | Constructor of string
-    
+
+let fatal_error loc str = raise Location.( Error( error ~loc str) ) 
+let pp = Format.sprintf 
+
+let expected loc str = fatal_error loc @@
+			 pp "Ppx_listlike: %s expected" str
+				
 let var pat = match pat.ppat_desc with
   | Ppat_var {Loc.txt;loc} -> txt
-  | _ -> assert false
+  | _ -> expected pat.ppat_loc "pattern variable" 
 
 let const_string e= match e.pexp_desc with
   | Pexp_constant ( Asttypes.Const_string(s, _ ) ) -> s
-  | _ -> assert false
+  | _ -> expected e.pexp_loc "string litteral"
 
 let constructor e = match e.pexp_desc with
   | Pexp_construct(llid,None) -> llid.Loc.txt
-  | _ -> assert false
+  | _ -> expected e.pexp_loc "constructor" 
 
-let kind = function
+let kind loc = function
   | Lid.Lident x -> (
     match x with
     | "List"-> List
     | "Array_indices" -> Array_indices
     | "String_indices" -> String_indices
     | "Bigarray_indices" -> Bigarray_indices
-    | _ -> assert false
+    | _ -> expected loc "constructor kind \
+		     (i.e. List|Array_indices|String_indices|Bigarray_indices)"
   )
-  | _ -> assert false
+  | _ -> expected loc "long identifier" 
 		
 let field (llid,e) =
   let open Lid in
   match llid.Loc.txt with
-  | Lident "kind" -> "kind" , Kind( kind @@ constructor e )
+  | Lident "kind" -> "kind" , Kind( kind llid.Loc.loc @@ constructor e )
   | Lident ("cons" as s) | Lident ("nil" as s)  -> s, Constructor(const_string e)
-  | _ -> assert false
+  | _ -> fatal_error llid.Loc.loc @@
+	   pp "Ppx_listlike: Unknown field name in constructor description"
 
 let destruct_kind = function
   | Kind k -> k
@@ -232,7 +240,7 @@ let record e = match e.pexp_desc with
      let open Defs in
      let named = fold_map (|+>) field empty l in
      reconstruct named  
-  | _ -> assert false
+  | _ -> expected e.pexp_loc "record"
 	   
     
 let binding b =
