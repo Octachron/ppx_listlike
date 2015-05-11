@@ -22,7 +22,6 @@ module Nlist = struct
       | [%ll? a::l ] -> fold (|+>) (start |+> a) l 
       | [%ll? [] ] -> start
   end
-open Nlist
        
 module Std_array = Array
 module String = struct
@@ -46,15 +45,16 @@ module String = struct
 
 module MdA=String 		  
 
-let%ppx_listlike md = { kind = String_indices; cons = "Cons"; nil = "Nil" } 
-
-let a  = MdA.make [%ll[2;3;4]] 3
+let%ppx_listlike md = { kind = String_indices; cons = "Nlist.Cons"; nil = "Nlist.Nil" } 
+and nl = {kind=List; cons="Nlist.Cons"; nil="Nlist.Nil" }
+			
+let a  = MdA.make [%nl[2;3;4]] 3
 
 let n = [%md a.[1;2;3] ];;		    
 
 		    
 	    
-
+open Nlist
 let%ppx_listlike longname = { kind = List; cons = "Cons"; nil="Nil" } 
 		    
 		    
