@@ -9,6 +9,15 @@ type lid = Longident.t =
   | Ldot of  lid * string
   | Lapply of lid * lid
 
+let with_prefixed s =
+  let n = String.length s in
+  if n>=5 then ( 
+    match String.sub s 0 5 with
+    | "with_" -> Some (String.sub s 5 (String.length s - 5 ) )
+    | _ -> None
+  )
+  else
+    None;;
 
 let fatal_error loc str = raise Location.( Error( error ~loc str) )
 let pp = Format.sprintf
@@ -176,6 +185,9 @@ module Opt = struct
   let (><?) opt default = match opt with
     | Some x -> x
     | None -> default
+
+  let maybe f x =
+    f x ><? x
       
 end
 open Opt
@@ -296,8 +308,6 @@ module Expr = struct
       | _ -> assert false
 
     let extract  = function
-      | PStr [] -> (* [%ext] is replaced by [] *)
-        Some (Expr_seq.mk_nil (snd Constructor.std) Loc.none)
       | PStr [ {pstr_desc = Pstr_eval (expr, _) ; _ } ] -> Some expr
       | _ -> None
         
@@ -308,8 +318,13 @@ module Expr = struct
       | "ppx_listlike", Some expr -> ppx_interpreter mapper env expr
       | s, Some expr -> (
           try
-            let constr = Defs.find s env.defs in
-            Expr_seq.mk_list constr mapper env expr
+            match with_prefixed s with
+            | Some s -> 
+              let constr = Defs.find s env.defs in
+              rm_env mapper.expr mapper (activate constr env) expr
+            | None ->
+              let constr = Defs.find s env.defs in
+              Expr_seq.mk_list constr mapper env expr
           with Not_found -> super
         )
       | _ -> super
@@ -356,6 +371,7 @@ module Pat = struct
     | "ppx_listlike", Some pat -> ppx_interpreter mapper env pat
     | s, Some (pat) -> (
         try
+          let s = maybe with_prefixed s in
           let constr = Defs.find s env.defs in
           let env = activate constr env in
     rm_env mapper.pat mapper env pat

@@ -49,7 +49,7 @@ and nl = {kind=List; cons="Nlist.Cons"; nil="Nlist.Nil" }
 			
 let a  = MdA.make [%nl 2; 3; 4] 3
 
-(*let n = [%md a.[1;2;3] ];; *)
+let n = [%with_md a.[1;2;3] ];;
 
 		    
 	    
@@ -59,7 +59,7 @@ let%ppx_listlike longname = { kind = List; cons = "Cons"; nil="Nil" }
 		    
 let l =[%longname 1; 2; 3; 4 ];;
 
-let l2 = [%ll 5;6;7;8];;  
+let l2 = [%ll 5;6;7;8 ];;  
 
 let l3 = [ 10; 14]  
 

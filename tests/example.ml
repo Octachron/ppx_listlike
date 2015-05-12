@@ -11,15 +11,15 @@ let rec map f g = function
   | [%ll? [] ] -> [%ll]
 
 (* map : ('a,'b) t -> ('a->'c) -> ('b->'d) -> ('c,'d) t *)
-(*let rec map f g =[%ll function
+let rec map f g =[%with_ll function
   | a::q -> (f a)::(map g f q)
   | [] -> []
 ]		   
 (* map : ('a,'b) t -> ('a->'c) -> ('b->'d) -> ('c,'d) t *)
-let rec map f g =function
+let rec map f g =function%with_ll
   | a::q -> (f a)::(map g f q)
   | [] -> []
-*)
+
 let%ppx_listlike nl = { cons="Cons_nl"; nil="Nil_nl"; kind=List }
 and mi = { cons="Cons"; nil="Nil"; kind=String_indices } 
 			
