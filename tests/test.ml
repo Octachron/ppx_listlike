@@ -1,5 +1,4 @@
-(*[%listlike register "n"  ~nil:"Nil" ~cons:"Cons"];;
- *)
+
 type z  =Zero_type
 type 'a succ = Succ_type
 		 
@@ -34,9 +33,9 @@ module String = struct
   int-> int -> (int,nat) Nlist.t -> (int,nat) Nlist.t -> int =
     fun m total word shape ->
     let open Nlist in
-    match%ll word, shape with
-    | k::w2, d::s2 -> flat_indice (m*d) (k*m + total) w2 s2    
-    | [], [] -> total      
+    match word, shape with
+    | [%ll? k::w2, d::s2] -> flat_indice (m*d) (k*m + total) w2 s2    
+    | [%ll? [], [] ] -> total      
 			
   let get (sh,array) indices =
     Std_array.get array @@ flat_indice 1 0 indices sh
@@ -48,9 +47,9 @@ module MdA=String
 let%ppx_listlike md = { kind = String_indices; cons = "Nlist.Cons"; nil = "Nlist.Nil" } 
 and nl = {kind=List; cons="Nlist.Cons"; nil="Nlist.Nil" }
 			
-let a  = MdA.make [%nl[2;3;4]] 3
+let a  = MdA.make [%nl 2; 3; 4] 3
 
-let n = [%md a.[1;2;3] ];;		    
+(*let n = [%md a.[1;2;3] ];; *)
 
 		    
 	    
@@ -58,18 +57,18 @@ open Nlist
 let%ppx_listlike longname = { kind = List; cons = "Cons"; nil="Nil" } 
 		    
 		    
-let l =[%longname[1;2;3;4]];;
+let l =[%longname 1; 2; 3; 4 ];;
 
-let%ll l2 = [5;6;7;8];;  
+let l2 = [%ll 5;6;7;8];;  
 
-let l3 = [10]  
+let l3 = [ 10; 14]  
 
 let print_list l = 
   Format.printf "@[%a@]\n" (fun ppf -> iter @@ Format.fprintf ppf "%d@;") l
 
 let () =
   let%ppx_listlike nl = { kind=List; cons="Cons"; nil="Nil" } in
-  let%nl l = [-1;-2;-4] in
+  let l = [%nl -1;-2;-4] in
   print_list l
 
 	     

@@ -296,6 +296,8 @@ module Expr = struct
       | _ -> assert false
 
     let extract  = function
+      | PStr [] -> (* [%ext] is replaced by [] *)
+        Some (Expr_seq.mk_nil (snd Constructor.std) Loc.none)
       | PStr [ {pstr_desc = Pstr_eval (expr, _) ; _ } ] -> Some expr
       | _ -> None
         
@@ -307,7 +309,7 @@ module Expr = struct
       | s, Some expr -> (
           try
             let constr = Defs.find s env.defs in
-            rm_env mapper.expr mapper (activate constr env) expr
+            Expr_seq.mk_list constr mapper env expr
           with Not_found -> super
         )
       | _ -> super
