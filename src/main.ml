@@ -223,9 +223,15 @@ let replace_constr cons lid=
 module Interpreter = struct
   
   type microtype = Kind of kind | Constructor of lid
-                     
+
+  let check_identifier loc s = match with_prefixed s with
+    | None -> s
+    | Some _ -> fatal_error loc @@ pp
+        "Ppx_listlike: invalide ppx_listlike identifier %s.\
+         @\n Identifiers cannot start with a \"with_\" prefix" s
+
   let var pat = match pat.ppat_desc with
-    | Ppat_var {Loc.txt;loc} -> txt
+    | Ppat_var {Loc.txt;loc} -> check_identifier pat.ppat_loc txt
     | _ -> expected pat.ppat_loc "pattern variable"
              
   let const_string e= match e.pexp_desc with
