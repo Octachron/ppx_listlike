@@ -37,6 +37,20 @@ module Lid = struct
       | _ when pos =0 -> Lident (String.sub s 0 (ende+1))
       | _ -> split s false (pos-1) ende in
     split s true (n-1) (n-1)
+
+  let to_string lid =
+    let b = Buffer.create 5 in
+    let rec to_string = function
+      | Lident s -> Buffer.add_string b s
+      | Ldot(lid,s) -> to_string lid; Buffer.add_char b '.'; Buffer.add_string b s
+      | Lapply (lid,s) ->
+        to_string lid;
+        Buffer.add_char b '(';
+        to_string s;
+        Buffer.add_char b  ')' in
+    let () = to_string lid in
+    Buffer.contents b
+
 end
 
 let fold_map (|+>) map start l =
@@ -65,6 +79,10 @@ module Defs = struct
     end)
   type st = Constructor.t t
   let (|+>) env (key,value) = add key value env
+
+  let find_opt kind status =
+    try Some (find kind status) with
+    | Not_found -> None
 end
 
 module Status = struct
@@ -249,6 +267,14 @@ module Interpreter = struct
     | Constructor c -> c
     | _ -> assert false
       
+let destruct named =
+  let open Defs in
+  let open Constructor in
+  empty
+  |+> ("kind", Kind named.kind)
+  |+> ("cons", Constructor named.cons )
+  |+> ("nil", Constructor named.nil )
+
 let reconstruct named =
   let find x = Defs.find x named in
   let find_cons x = destruct_cons @@ find x in
@@ -257,18 +283,26 @@ let reconstruct named =
     find_cons "cons",
     find_cons "nil" in
   Constructor.{ kind; cons; nil }
+
     
-let record e = match e.pexp_desc with
-  | Pexp_record (l, None ) ->
+let rec record defs e = match e.pexp_desc with
+  | Pexp_ident {Loc.txt; _} ->
+    let s = Lid.to_string txt in
+    ( match Defs.find_opt s defs with
+      | Some def -> def
+      | None -> fatal_error e.pexp_loc @@ pp "Ppx_listlike: unknown constructor rewriter %s \n" s
+    )
+  | Pexp_record (l, e ) ->
     let open Defs in
-    let named = fold_map (|+>) field empty l in
+    let start = e |>? record defs |>? destruct ><? empty in
+    let named = fold_map (|+>) field start l in
     reconstruct named
   | _ -> expected e.pexp_loc "record"
            
 
-let binding b =
+let binding env b =
   var b.pvb_pat,
-  record b.pvb_expr
+  record env b.pvb_expr
     
 end
 
@@ -302,8 +336,9 @@ module Expr = struct
       let open Defs in
       match expr.pexp_desc with
       | Pexp_let (Asttypes.Nonrecursive, bindings, e ) ->
+        let defs = env.Env.defs in
         let defs =
-          fold_map (|+>) Interpreter.binding Env.(env.defs) bindings in
+          fold_map (|+>) (Interpreter.binding defs) defs bindings in
         rm_env mapper.expr mapper Env.{ env with defs } e
       | _ -> assert false
 
@@ -433,16 +468,17 @@ let case mapper env case =
 
 module Str = struct
   
-  let fold_binding defs item =
+  let fold_binding env defs item =
     match item.pstr_desc with
     | Pstr_value(Asttypes.Nonrecursive, bindings) ->
-      fold_map Defs.(|+>) Interpreter.binding defs bindings
+      List.fold_left
+        Defs.( fun defs b -> defs |+> Interpreter.binding defs b) defs bindings
     | _ -> assert false
       
   let ppx_interpreter mapper env str =
     let open Defs in
     let defs =
-      List.fold_left fold_binding Env.(env.defs) str in
+      List.fold_left (fold_binding env) Env.(env.defs) str in
     Env.{env with defs}, []
                          
   
