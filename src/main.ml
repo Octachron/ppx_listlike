@@ -23,6 +23,9 @@ let fatal_error loc str = raise Location.( Error( error ~loc str) )
 let pp = Format.sprintf
 let expected loc str =
   fatal_error loc @@ pp "Ppx_listlike: %s expected" str
+let unexpected loc str =
+  fatal_error loc @@ pp "Ppx_listlike: unexpected %s" str
+
 let ghost loc_a = Loc.{ loc_a with loc_ghost = true }
                     
 module Lid = struct
@@ -80,8 +83,8 @@ module Defs = struct
   type st = Constructor.t t
   let (|+>) env (key,value) = add key value env
 
-  let find_opt kind status =
-    try Some (find kind status) with
+  let find_opt defs kind =
+    try Some (find kind defs) with
     | Not_found -> None
 end
 
@@ -95,7 +98,7 @@ module Status = struct
   type st = Constructor.t t
     let (|+>) env constr =
       let open Constructor in add constr.kind constr env
-    let find_opt kind status =
+    let find_opt status kind =
       try Some (find kind status) with
       | Not_found -> None
         
@@ -204,6 +207,10 @@ module Opt = struct
     | Some x -> x
     | None -> default
 
+  let (><!) opt default = match opt with
+    | Some x -> x
+    | None -> default ()
+
   let maybe f x =
     f x ><? x
       
@@ -272,7 +279,7 @@ module Interpreter = struct
   let destruct_cons = function
     | Constructor c -> c
     | _ -> assert false
-      
+
 let destruct named =
   let open Defs in
   let open Constructor in
@@ -290,14 +297,16 @@ let reconstruct named =
     find_cons "nil" in
   Constructor.{ kind; cons; nil }
 
-    
+let find_rewriter defs loc s  =
+  Defs.find_opt defs s
+  ><! fun () ->  fatal_error loc @@ pp
+      "Ppx_listlike: unknown constructor rewriter [%s] \n\
+       Known rewriters: %a " s (fun () -> List.fold_left (fun acc (key,_) -> acc ^ ", [" ^ key^"]") "" ) (Defs.bindings defs)
+
 let rec record defs e = match e.pexp_desc with
-  | Pexp_ident {Loc.txt; _} ->
+  | Pexp_ident {Loc.txt; loc} ->
     let s = Lid.to_string txt in
-    ( match Defs.find_opt s defs with
-      | Some def -> def
-      | None -> fatal_error e.pexp_loc @@ pp "Ppx_listlike: unknown constructor rewriter %s \n" s
-    )
+    find_rewriter defs loc s
   | Pexp_record (l, e ) ->
     let open Defs in
     let start = e |>? record defs |>? destruct ><? empty in
@@ -306,9 +315,12 @@ let rec record defs e = match e.pexp_desc with
   | _ -> expected e.pexp_loc "record"
            
 
-let binding env b =
-  var b.pvb_pat,
-  record env b.pvb_expr
+let binding defs b = (var b.pvb_pat, record defs b.pvb_expr)
+
+
+let binding_fold defs b =
+  let open Defs in
+  defs |+> (binding defs b)
     
 end
 
@@ -346,29 +358,34 @@ module Expr = struct
         let defs =
           fold_map (|+>) (Interpreter.binding defs) defs bindings in
         rm_env mapper.expr mapper Env.{ env with defs } e
-      | _ -> assert false
+      | _ -> expected expr.pexp_loc "value binding"
 
-    let extract  = function
+
+    let extract loc = function
       | PStr [ {pstr_desc = Pstr_eval (expr, _) ; _ } ] -> Some expr
-      | _ -> None
-        
+      | PStr [] -> None
+      | _ -> expected loc "expression or empty extension node"
+
+    let extract_seq loc ext =
+      extract loc ext ><? Expr_seq.mk_nil (snd Constructor.std) Loc.none
+
     let extension mapper env super (name, payload) =
       let open Env in
       let open Loc in
-      match name.txt, extract payload with
-      | "ppx_listlike", Some expr -> ppx_interpreter mapper env expr
-      | s, Some expr -> (
+      let loc  = super.pexp_loc in
+      match name.txt with
+      | "ppx_listlike" -> payload |> extract loc |>? ppx_interpreter mapper env ><! fun () -> expected loc "non-empty extension node"
+      | s ->
           try
             match with_prefixed s with
             | Some s -> 
               let constr = Defs.find s env.defs in
-              rm_env mapper.expr mapper (activate constr env) expr
+              rm_env mapper.expr mapper (activate constr env) @@ extract_seq loc payload
             | None ->
               let constr = Defs.find s env.defs in
-              Expr_seq.mk_list constr mapper env expr
+              Expr_seq.mk_list constr mapper env @@ extract_seq loc payload
           with Not_found -> super
-        )
-      | _ -> super
+
 end
 
 
@@ -377,14 +394,14 @@ let expr mapper env expr =
   let open Env in
   match expr.pexp_desc with
   | Pexp_construct (lid, expr_opt) ->
-    let lid =  Opt.may replace_constr (find_opt List env.status) lid
+    let lid =  Opt.may replace_constr (find_opt env.status List) lid
     and expr_opt = expr_opt |>? rm_env mapper.expr mapper env in
     env, { expr with pexp_desc = Pexp_construct( lid, expr_opt) }
   | Pexp_apply (f, args) ->
     let f = rm_env mapper.expr mapper env f in
     env,
     Indices.identify f
-    >>=? (fun (kind,arg_map) -> Status.find_opt kind Env.(env.status)
+    >>=? (fun (kind,arg_map) -> Status.find_opt Env.(env.status) kind
     |>? ( fun cons ->
         H.Exp.apply ~loc:expr.pexp_loc f @@
         arg_map
@@ -401,24 +418,24 @@ module Pat = struct
   let ppx_interpreter mapper env pat =
     rm_env mapper.pat mapper env pat
       
-  let extract = function
-    | PPat (pat,None) -> Some (pat)
-    | _ -> None
+  let extract loc = function
+    | PPat (pat,None) -> pat
+    | PPat (pat,Some g) -> unexpected loc "guard"
+    | _ -> expected loc "pattern"
       
   let extension mapper env super (name, payload) =
     let open Env in
     let open Loc in
-    match name.txt, extract payload with
-    | "ppx_listlike", Some pat -> ppx_interpreter mapper env pat
-    | s, Some (pat) -> (
+    let pat () =  extract super.ppat_loc payload in
+    match name.txt with
+    | "ppx_listlike" -> ppx_interpreter mapper env @@ pat ()
+    | s ->
         try
           let s = maybe with_prefixed s in
           let constr = Defs.find s env.defs in
           let env = activate constr env in
-    rm_env mapper.pat mapper env pat
+          rm_env mapper.pat mapper env @@ pat ()
         with Not_found -> super
-      )
-    | _ -> super
 end
 
 
@@ -427,7 +444,7 @@ let pat mapper env pat =
   let open Env in
   match pat.ppat_desc with
   | Ppat_construct (lid, pat_opt) ->
-     let lid =  Opt.may replace_constr (find_opt List env.status) lid
+     let lid =  Opt.may replace_constr (find_opt env.status List) lid
      and pat_opt = pat_opt |>? rm_env mapper.pat mapper env in
      env, { pat with ppat_desc = Ppat_construct( lid, pat_opt) }
   | Ppat_extension ext -> env, Pat.extension mapper env pat ext
@@ -438,28 +455,29 @@ module Case = struct
   let ppx_interpreter mapper env case =
     rm_env mapper.case mapper env case
       
-  let extract = function
-    | PPat (pat,guard) -> Some (pat,guard)
-    | _ -> None
+  let extract loc = function
+    | PPat (pat,guard) -> pat,guard
+    | _ -> expected loc "pattern"
       
   let extension mapper env super (name, payload) =
     let open Env in
     let open Loc in
-    match name.txt, extract payload with
-    | "ppx_listlike", Some (pc_lhs,pc_guard) ->
+    let pat () = extract super.pc_lhs.ppat_loc payload in
+    match name.txt  with
+    | "ppx_listlike"->
+      let pc_lhs, pc_guard = pat() in
       let case = {super with pc_lhs ;pc_guard} in
       ppx_interpreter mapper env case
-    | s, Some (pat,guard) -> (
-        try
+    | s ->
+      try
           let constr = Defs.find s env.defs in
+          let pat,guard = pat() in
           let pc_rhs = rm_env mapper.expr mapper env super.pc_rhs in
           let env = activate constr env in
           let pc_lhs = rm_env mapper.pat mapper env pat in
           let pc_guard = guard |>? rm_env mapper.expr mapper env in
           Some {pc_lhs; pc_guard; pc_rhs}
         with Not_found -> Some super
-      )
-    | _ -> Some super
 end
 
 
@@ -474,36 +492,43 @@ let case mapper env case =
 
 module Str = struct
   
-  let fold_binding env defs item =
+  let fold_binding defs item =
     match item.pstr_desc with
     | Pstr_value(Asttypes.Nonrecursive, bindings) ->
-      List.fold_left
-        Defs.( fun defs b -> defs |+> Interpreter.binding defs b) defs bindings
-    | _ -> assert false
+      List.fold_left Interpreter.binding_fold defs bindings
+    | Pstr_value(Asttypes.Recursive, _) ->
+      fatal_error item.pstr_loc @@ pp
+      "Ppx_listlike: Recursive binding are not implemented"
+     | _ -> expected item.pstr_loc "value binding"
       
   let ppx_interpreter mapper env str =
     let open Defs in
     let defs =
-      List.fold_left (fold_binding env) Env.(env.defs) str in
+      List.fold_left fold_binding Env.(env.defs) str in
     Env.{env with defs}, []
                          
   
   let extract  = function
     | PStr str -> Some str
     | _ -> None
-      
+
   let extension mapper env super (name, payload) =
     let open Env in
     let open Loc in
       match name.txt, extract payload with
         | "ppx_listlike", Some str -> ppx_interpreter mapper env str
-        | s, Some str -> (
-            try
-              let constr = Defs.find s env.defs in
-              mapper.structure mapper (activate constr env) str
-            with Not_found -> env, [super]
-          )
-        | _ -> env, [super]
+        | s, Some str ->
+              let env =
+                with_prefixed s
+                >>=?  Defs.find_opt env.defs
+                |>? (fun c -> activate c env)
+                ><? env in
+              mapper.structure mapper env str
+        | s, None ->
+          maybe with_prefixed s
+          |> Defs.find_opt env.defs
+          |>? expected super.pstr_loc "non-empty extension node"
+          ><? env, [super]
 end
 
 let structure mapper env =
