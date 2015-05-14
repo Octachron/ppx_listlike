@@ -552,7 +552,14 @@ let structure mapper env =
         q
         
 let listlike_mapper argv =
-  to_transform Env.default
+  let env = ref Env.default in
+  let args= Arg.[
+    "nodefault", Unit (fun () -> env:=Env.empty), "Start with an empty environment with no default rewriter" 
+  ]
+  and anonymous s = raise @@  Arg.Bad "Invalid argument"
+  and usage_msg = "ppx_indexop options input output" in
+  let () = Arg.parse_argv (Array.of_list argv) args anonymous usage_msg in
+  to_transform (!env)
     { identity  with
       expr;
       pat;
