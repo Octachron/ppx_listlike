@@ -1,2 +1,16 @@
 version="0.1"
+description="Listlike literals for custom types"
 ppx="ppx_listlike"
+
+package "nostd" (
+  version = "0.1"
+  description = "No standard environment"
+  requires = "ppx_listlike"
+  ppxopt = "ppx_listlike,-nostd"
+)
+package "std" (
+  version = "0.1"
+  description = "Standard environment"
+  requires = "ppx_listlike"
+  ppxopt = "ppx_listlike,-std"
+)

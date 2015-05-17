@@ -552,14 +552,14 @@ let structure mapper env =
         q
         
 let listlike_mapper argv =
-  let env = ref Env.default in
-  let args= Arg.[
-    "nodefault", Unit (fun () -> env:=Env.empty), "Start with an empty environment with no default rewriter" 
-  ]
-  and anonymous s = raise @@  Arg.Bad "Invalid argument"
-  and usage_msg = "ppx_indexop options input output" in
-  let () = Arg.parse_argv (Array.of_list argv) args anonymous usage_msg in
-  to_transform (!env)
+  let out = open_out "/tmp/ppx_listlike.log" in
+  let pp x = Printf.fprintf out x in
+  pp "args: "; List.iter (pp "%s ") argv; pp "\n";
+  let env= match argv with
+  | ["-std"] -> Env.default
+  | ["-nostd"] -> Env.empty
+  | _ -> Env.default in  
+  to_transform env
     { identity  with
       expr;
       pat;
