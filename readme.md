@@ -61,7 +61,7 @@ To circumvent this limitation, ppx_listlike adds a mechanism to define list-like
 ```Ocaml
 let%ppx_listlike nl = { cons="Cons_nl"; nil="Nil_nl"; kind=List } 
 ```
-The fields `cons` and `nil` define the name of the constructors that will replace the `::` and `[]`. The `kind` field is defined to `List` for list-like constructor rewriter. Once this `nl` rewriter defined, list literals inside a `[%with_nl ..]
+The fields `cons` and `nil` define the name of the constructors that will replace the `::` and `[]`. The `kind` field is defined to `List` for list-like constructor rewriter. Once this `nl` rewriter defined, list literals inside a `[%with_nl ..]`
 extension point will be replaced the corresponding "Cons_nl .. Nil_nl" construction.
 The simplified `[%nl .. ]` extension node implements a limited version of this rewriting mechanism which transforms an expression sequence `e1;e2;..` to the corresponding list literal.
 
@@ -70,8 +70,20 @@ For instance, the `ll` and `stdl` extension point used earlier are predefined co
 let%ppx_listlike ll = { cons="Cons"; nil="Nil"; kind=List }
 and stdl = { cons = "::"; nil="[]"; kind=List }
 ```
-For obvious reasons, a valid rewriter name can not start with a "with_" prefix. 
-It is also possible to define local rewriters active only inside an expression with a `let ... in` binding.
+For obvious reasons, a valid rewriter name can not start with a "with_" prefix. It is also possible to define local rewriters active only inside an expression with a `let ... in` binding. Moreover, standard syntax for record can be used but the value of the fields needs to be constant literals. For instance 
+```Ocaml
+let%ppx_listlike ex = { ll with cons = "Snoc"; nil = "Lin" }
+```
+is fine but 
+```Ocaml
+let not_a_literal = "Cons"
+let%ppx_listlike ex = { ll with cons = not_a_litteral }
+```
+is not.
+
+##Avoiding ppx interferences
+If the predefined  `[%ll]` and `[%stdl]` rewriter interfers with some other ppx extensions, the `-nostd` option can be used to start `ppx_listlike` with no predefined rewriters. For findlib based build systems, the easiest way to pass this option is to use the `ppx_listlike.notsd ` subpackage (i.e. ` -pkg ppx_listlike.nostd ` rather than 
+`-pkg ppx_listlike`).
 
 ##Extremely experimental features
 This ppx extension contains also few very experimental features exploring an alternative syntax/semantic for multidimensionnal indices for array-like type (i.e. array, string and bigarray). These features can be activated by first defining an array indices rewriter
@@ -79,4 +91,5 @@ This ppx extension contains also few very experimental features exploring an alt
 let%ppx_listlike mi = { cons="Cons"; nil="Nil"; kind=String_indices } 
 ```
 Then, inside an [%with_mi..] extension point, the corresponding access operator
-`[%with_mi s.[a;b] ]` will be rewritten to ` s.[Cons(a,Cons(b,Nil))]`.
+`[%with_mi s.[a;b] ]` will be rewritten to ` s.[Cons(a,Cons(b,Nil))]`. The same feature is available for `string`, `array` abd `bigarray` indices through
+respectively the `String_indices`, `Array_indices` and `Bigarray_indices` constructors.
