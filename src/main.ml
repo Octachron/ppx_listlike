@@ -552,9 +552,6 @@ let structure mapper env =
         q
         
 let listlike_mapper argv =
-  let out = open_out "/tmp/ppx_listlike.log" in
-  let pp x = Printf.fprintf out x in
-  pp "args: "; List.iter (pp "%s ") argv; pp "\n";
   let env= match argv with
   | ["-std"] -> Env.default
   | ["-nostd"] -> Env.empty
