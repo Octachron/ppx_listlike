@@ -1,5 +1,7 @@
 type ('a,'b) t = Nil | Cons of 'a * ('b,'a) t
 
+let v = [%ll]
+
 let n =[%ll 1; "One one"; 11; "Two one"; 21; "One two one one"]
 let nested_list =
   let inner = [2;3] in 

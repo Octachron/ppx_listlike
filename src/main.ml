@@ -380,10 +380,14 @@ module Expr = struct
             match with_prefixed s with
             | Some s -> 
               let constr = Defs.find s env.defs in
-              rm_env mapper.expr mapper (activate constr env) @@ extract_seq loc payload
+              extract loc payload
+              |>? rm_env mapper.expr mapper (activate constr env)
+              ><? super
             | None ->
               let constr = Defs.find s env.defs in
-              Expr_seq.mk_list constr mapper env @@ extract_seq loc payload
+              extract loc payload
+              |>? Expr_seq.mk_list constr mapper env
+              ><? Expr_seq.mk_nil constr loc
           with Not_found -> super
 
 end
