@@ -516,23 +516,24 @@ module Str = struct
     | PStr str -> Some str
     | _ -> None
 
-  let extension mapper env super (name, payload) =
+  let extension mapper env super ((name, payload),attrs) =
     let open Env in
     let open Loc in
       match name.txt, extract payload with
         | "ppx_listlike", Some str -> ppx_interpreter mapper env str
         | s, Some str ->
-              let env =
-                with_prefixed s
-                >>=?  Defs.find_opt env.defs
-                |>? (fun c -> activate c env)
-                ><? env in
-              mapper.structure mapper env str
+          with_prefixed s
+          >>=? Defs.find_opt env.defs
+          |>? (fun c ->
+              let env = activate c env in
+              mapper.structure mapper env str )
+              ><?
+              let env, inner = mapper.structure mapper env str in (env, [{ super with pstr_desc = Pstr_extension ((name, PStr inner),attrs) }] )
         | s, None ->
           maybe with_prefixed s
           |> Defs.find_opt env.defs
           |>? expected super.pstr_loc "non-empty extension node"
-          ><? env, [super]
+          ><? env, [ super ]
 end
 
 let structure mapper env =
@@ -544,7 +545,7 @@ let structure mapper env =
     let q env = mapper.structure mapper env q in
     match item.pstr_desc with
     | Pstr_extension (ext,attributes) ->
-      let env', str = Str.extension mapper env item ext in
+      let env', str = Str.extension mapper env item (ext,attributes) in
       let env = {env with defs = env'.defs } in
       let env, q = q env in
       env, str @ q
