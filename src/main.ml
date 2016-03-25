@@ -3,7 +3,24 @@ module H = Ast_helper
 module Loc = Location
 open Env_mapper
 type 'a loc = 'a Loc.loc
-    
+
+(**
+This syntax extension introduces customizable list rewriters. These list rewriters rewrite list litterals [ a_1;..;a_n]
+to the more standard "Cons"(a_1,...,"Cons"(a_n, "Nil" )..). The constructors used (i.e. "Cons" and "Nil") are also customisable.
+
+Feature list:
+
+- [%ll a_1; ..; a_n  ] : rewrite the sequence with the ll rewriter
+- [%with_ll ... ]:  rewrite every list litterals with the ll rewriter
+- [%ll? ]: short syntax for [%with_ll ] inside a pattern
+- [%ppx_listlike rewriter = {kind; nil; cons } ] define a new rewriter
+   - kind : list, array_index, string_index,bigarray_index
+   - nil, cons: the nil and cons constructor
+- [%ppx_listlike.associate ~module_ ~rewriter ] : automatically open the named rewriter when the corresponding module is opened
+*)
+
+
+
 type lid = Longident.t =
   | Lident of string
   | Ldot of  lid * string
@@ -11,7 +28,7 @@ type lid = Longident.t =
 
 let with_prefixed s =
   let n = String.length s in
-  if n>=5 then ( 
+  if n>=5 then (
     match String.sub s 0 5 with
     | "with_" -> Some (String.sub s 5 (String.length s - 5 ) )
     | _ -> None
@@ -27,7 +44,6 @@ let unexpected loc str =
   fatal_error loc @@ pp "Ppx_listlike: unexpected %s" str
 
 let ghost loc_a = Loc.{ loc_a with loc_ghost = true }
-                    
 module Lid = struct
   let from_string loc s =
     let n = String.length s in
@@ -61,9 +77,8 @@ let fold_map (|+>) map start l =
     (fun acc x -> acc |+> map x )
     start
     l
-    
+
 type kind = List | Array_indices | Bigarray_indices | String_indices
-            
 module Constructor = struct
   type t = { kind:kind; cons: lid; nil: lid}
   let default = "ll", { kind=List; cons=Lident "Cons"; nil=Lident "Nil" }
@@ -73,7 +88,6 @@ end
 
 let nil c = c.Constructor.nil
 let cons c = c.Constructor.cons
-               
 module Defs = struct
   include Map.Make(
     struct
@@ -94,29 +108,44 @@ module Status = struct
       type t=kind
       let compare (x:kind) y = compare x y
     end)
-      
   type st = Constructor.t t
     let (|+>) env constr =
       let open Constructor in add constr.kind constr env
     let find_opt status kind =
       try Some (find kind status) with
       | Not_found -> None
-        
+end
+
+module Associations = struct
+  include Map.Make(
+    struct
+      type t = Longident.t
+      let compare = compare
+    end
+    )
+      type st = Constructor.t t
+
+let (|+>) env (module_,constr) =
+  let open Constructor in add module_ constr env
+let find_opt status kind =
+  try Some (find kind status) with
+  | Not_found -> None
+
 end
 
 module Env = struct
   type t = {
     defs: Defs.st;
-    status: Status.st
+    status: Status.st;
+    mod_assoc: Associations.st
   }
-  
-  let empty = { defs = Defs.empty; status=Status.empty }
+
+  let empty = { defs = Defs.empty; status=Status.empty; mod_assoc=Associations.empty }
   let define def env =
     { env with defs = Defs.( env.defs |+> def ) }
   let activate cons env =
     { env with status = Status.( env.status |+> cons )}
-    
-  
+
   let default =
     empty
     |> define Constructor.default
@@ -124,9 +153,8 @@ module Env = struct
 end
 
 module Indices = struct
-  
+
   let map_2 f (a,b) = a, f b
-                        
   let map special f g l =
     let rec map special f g l =
       if special <= 0 then List.map (map_2 f) l else
@@ -136,15 +164,14 @@ module Indices = struct
     match l with
     | a::q -> (map_2 f a)::(map special f g q)
     | [] -> []
-            
+
   let array_map g e = match e.pexp_desc with
     | Pexp_array l -> { e with pexp_desc = Pexp_array (List.map g l) }
     | _ -> e
-      
+
   let map_generic f g l =
     map 1 f (array_map g) l
-      
-  
+
   let identify_lid lid =
     match lid with
     | Lident (".()"|".()<-")
@@ -170,13 +197,11 @@ module Indices = struct
             ("get"|"unsafe_get"|"set"|"unsafe_set") ) ->
       Some (Bigarray_indices, map_generic )
     | _ -> None
-      
-  
+
   let identify exp =
     match exp.pexp_desc with
     | Pexp_ident lid -> identify_lid lid.Loc.txt
     | _ -> None
-      
 end
 
 module Opt = struct
@@ -187,7 +212,6 @@ module Opt = struct
 
   let ( >>=? ) x f =
     match x with None -> None | Some x -> f x
-                                            
   let rec map_for_all f = function
     | [] -> Some []
     | a::q -> match f a with
@@ -195,28 +219,21 @@ module Opt = struct
       | Some x -> match map_for_all f q with
         | Some l -> Some (x::l)
         | None -> None
-          
   let ( |>? ) x f =
     match x with None -> None | Some x -> Some (f x)
-                                            
   let may f param x = match param with
     | Some p -> f p x
     | None -> x
-      
   let (><?) opt default = match opt with
     | Some x -> x
     | None -> default
-
   let (><!) opt default = match opt with
     | Some x -> x
     | None -> default ()
-
   let maybe f x =
     f x ><? x
-      
 end
 open Opt
-    
 
 let replace_constr cons lid=
   let open Loc in
@@ -226,9 +243,12 @@ let replace_constr cons lid=
   | Lident "::" ->  { lid with txt = cons.cons }
   | Lident "[]" -> { lid with txt = cons.nil }
   | _ -> lid
-    
 module Interpreter = struct
-  
+
+  module Labeled = Map.Make ( struct
+      type t = string
+      let compare = compare
+    end)
   type microtype = Kind of kind | Constructor of lid
 
   let check_identifier loc s = match with_prefixed s with
@@ -240,15 +260,12 @@ module Interpreter = struct
   let var pat = match pat.ppat_desc with
     | Ppat_var {Loc.txt;loc} -> check_identifier pat.ppat_loc txt
     | _ -> expected pat.ppat_loc "pattern variable"
-             
   let const_string e= match e.pexp_desc with
     | Pexp_constant ( Asttypes.Const_string(s, _ ) ) -> s
     | _ -> expected e.pexp_loc "string litteral"
-             
   let constructor e = match e.pexp_desc with
     | Pexp_construct(llid,None) -> llid.Loc.txt
     | _ -> expected e.pexp_loc "constructor"
-             
   let kind loc = function
     | Lident x -> (
         match x with
@@ -260,7 +277,23 @@ module Interpreter = struct
                          (i.e. List|Array_indices|String_indices|Bigarray_indices)"
       )
     | _ -> expected loc "long identifier"
-             
+
+  let labelled_arg (unlabelled,labelled) (arg_label, e) =
+    let open Asttypes in
+    match arg_label with
+    | (* Nolabel | Optional _ *) ""  -> e::unlabelled, labelled
+    | s -> unlabelled, Labeled.add s e labelled
+
+  let apply_with_labels args_desc args=
+    let unlbl, lbls = List.fold_left labelled_arg ([],Labeled.empty) args in
+    let choose_arg (unlbl,args) arg_desc = match arg_desc with
+      | "" -> (match unlbl with
+          | a::q -> q, a::args
+          | _ -> assert false
+        )
+      | s -> let a = Labeled.find s lbls in (unlbl,a::args) in
+    List.fold_left choose_arg (List.rev unlbl,[]) args_desc
+  |> snd |> List.rev
   let field (llid,e) =
     let open Lid in
     let txt = llid.Loc.txt in
@@ -271,11 +304,9 @@ module Interpreter = struct
       s, Constructor(Lid.from_string loc @@ const_string e)
   | _ -> fatal_error llid.Loc.loc @@
     pp "Ppx_listlike: Unknown field name in constructor description"
-      
   let destruct_kind = function
     | Kind k -> k
     |  _ -> assert false
-      
   let destruct_cons = function
     | Constructor c -> c
     | _ -> assert false
@@ -313,30 +344,25 @@ let rec record defs e = match e.pexp_desc with
     let named = fold_map (|+>) field start l in
     reconstruct named
   | _ -> expected e.pexp_loc "record"
-           
 
 let binding defs b = (var b.pvb_pat, record defs b.pvb_expr)
-
-
 let binding_fold defs b =
   let open Defs in
   defs |+> (binding defs b)
-    
 end
 
 module Expr_seq = struct
-  
   let mk_nil constr nil_loc =
     let loc = ghost nil_loc in
     let lid =Loc.{txt = nil constr ; loc } in
     H.Exp.construct ~loc lid None
-      
+
   let mk_cons constr loc e1 e2 =
     let loc = ghost loc in
     let constr = Loc.{txt = cons constr; loc} in
     let tuple = H.Exp.tuple ~loc [e1;e2] in
     H.Exp.construct ~loc constr (Some tuple)
-      
+
   let rec mk_list cons mapper env exp=
     match exp.pexp_desc with
     | Pexp_sequence (e1,e2 ) ->
@@ -378,7 +404,7 @@ module Expr = struct
       | s ->
           try
             match with_prefixed s with
-            | Some s -> 
+            | Some s ->
               let constr = Defs.find s env.defs in
               extract loc payload
               |>? rm_env mapper.expr mapper (activate constr env)
@@ -412,21 +438,21 @@ let expr mapper env expr =
           (rm_env mapper.expr mapper env )
           (Expr_seq.mk_list cons mapper env)
           args
-      ) 
+      )
     )
     ><? rm_env Env_mapper.identity.expr mapper env expr
   | Pexp_extension ext -> env, Expr.extension mapper env expr ext
   | _ -> Env_mapper.identity.expr mapper env expr
-           
+
 module Pat = struct
   let ppx_interpreter mapper env pat =
     rm_env mapper.pat mapper env pat
-      
+
   let extract loc = function
     | PPat (pat,None) -> pat
     | PPat (pat,Some g) -> unexpected loc "guard"
     | _ -> expected loc "pattern"
-      
+
   let extension mapper env super (name, payload) =
     let open Env in
     let open Loc in
@@ -453,16 +479,15 @@ let pat mapper env pat =
      env, { pat with ppat_desc = Ppat_construct( lid, pat_opt) }
   | Ppat_extension ext -> env, Pat.extension mapper env pat ext
   | _ -> Env_mapper.identity.pat mapper env pat
-           
 
 module Case = struct
   let ppx_interpreter mapper env case =
     rm_env mapper.case mapper env case
-      
+
   let extract loc = function
     | PPat (pat,guard) -> pat,guard
     | _ -> expected loc "pattern"
-      
+
   let extension mapper env super (name, payload) =
     let open Env in
     let open Loc in
@@ -491,11 +516,9 @@ let case mapper env case =
   match case.pc_lhs.ppat_desc with
   | Ppat_extension ext -> env, Case.extension mapper env case ext
   | _ -> Env_mapper.identity.case mapper env case
-           
-
 
 module Str = struct
-  
+
   let fold_binding defs item =
     match item.pstr_desc with
     | Pstr_value(Asttypes.Nonrecursive, bindings) ->
@@ -504,14 +527,13 @@ module Str = struct
       fatal_error item.pstr_loc @@ pp
       "Ppx_listlike: Recursive binding are not implemented"
      | _ -> expected item.pstr_loc "value binding"
-      
+
   let ppx_interpreter mapper env str =
     let open Defs in
     let defs =
       List.fold_left fold_binding Env.(env.defs) str in
     Env.{env with defs}, []
-                         
-  
+
   let extract  = function
     | PStr str -> Some str
     | _ -> None
@@ -555,12 +577,12 @@ let structure mapper env =
       cons_opt
         (rm_env Env_mapper.identity.structure_item mapper env item)
         q
-        
+
 let listlike_mapper argv =
   let env= match argv with
   | ["-std"] -> Env.default
   | ["-nostd"] -> Env.empty
-  | _ -> Env.default in  
+  | _ -> Env.default in
   to_transform env
     { identity  with
       expr;
