@@ -12,7 +12,7 @@ open Location
 
 let lid name = { txt = Lident name; loc = Location.none }
 
-  let make_string x = Exp.constant (Const_string (x, None))
+  let make_string x = Exp.constant (Pconst_string (x, None))
 
   let make_bool x =
     if x
@@ -67,7 +67,7 @@ let lid name = { txt = Lident name; loc = Location.none }
   let restore fields =
     let field name payload =
       let rec get_string = function
-        | { pexp_desc = Pexp_constant (Const_string (str, None)) } -> str
+        | { pexp_desc = Pexp_constant (Pconst_string (str, None)) } -> str
         | _ ->
             raise_errorf
               "Internal error: invalid [@@@ocaml.ppx.context { %s }] string syntax"

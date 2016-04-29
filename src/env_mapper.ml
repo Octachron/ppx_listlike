@@ -66,10 +66,10 @@ let map_tuple__2 f1 f2 env (x, y) =
 let map_tuple2_1 f1 f2 f3 (env1,env2,env3) (x, y, z) =
   let env1, x = f1 env1 x
   and env2, y = f2 env2 y
-  and z = f3 env3 z in	  
+  and z = f3 env3 z in
   (env1,env2,env3),(x,y,z)
 
-				      
+
 module Opt =
   struct
     let (|>? ) x f = match x with
@@ -81,22 +81,22 @@ module Opt =
       | Some x -> x
   end
 open Opt
-let ( <=<  )  (env',x)  (env,acc) = (env',x::acc)     
+let ( <=<  )  (env',x)  (env,acc) = (env',x::acc)
 
 let try_ x f = match snd @@ f x with
   | None -> x
   | Some x -> x
-				      
+
 let map_opt f = function None -> None | Some x -> Some (f x)
 
-						       
+
 let map_loc sub env {loc; txt} = {loc = sub.location sub env loc; txt}
 
 
 let thread_env f env l =
   let env,l = List.fold_left (fun acc x -> f (fst acc) x <=< acc ) (env,[]) l in
   env, List.rev l
-					
+
 let thread f env l =
   let env, l = List.fold_left (fun acc x -> f (fst acc) x <=< acc ) (env,[]) l in
   List.rev l
@@ -105,14 +105,14 @@ let cons_opt x l =
     match x with
     | None ->  l
     | Some x -> x::l
-		  	  
+
 let thread_opt f env l =
   let folder (env,l) x =
     let env, opt_x = f env x in
     env, cons_opt opt_x l
   in
   let env,l = List.fold_left folder (env,[]) l in
-  List.rev l 
+  List.rev l
 
 let thread_opt_env f env l =
   let folder (env,l) x =
@@ -188,8 +188,10 @@ module T = struct
     | Ptype_record l -> Ptype_record (thread (sub.label_declaration sub) env l)
     | Ptype_open -> Ptype_open
 
-  let map_constructor_arguments sub env l =
-    thread (sub.typ sub) env l
+ let map_constructor_arguments sub env = function
+    | Pcstr_tuple l -> Pcstr_tuple (thread (sub.typ sub) env l)
+    | Pcstr_record l ->
+        Pcstr_record (thread (sub.label_declaration sub) env l)
  
   let map_type_extension sub env
       {ptyext_path; ptyext_params;
@@ -294,7 +296,7 @@ module MT = struct
     let loc = sub.location sub env loc in
     let msi =  match desc with
       | Psig_value vd -> value ~loc (sub.value_description sub env vd)
-      | Psig_type ((*rf,*) l) -> type_ ~loc (*rf*) (thread (sub.type_declaration sub) env l)
+      | Psig_type (rf, l) -> type_ ~loc rf (thread (sub.type_declaration sub) env l)
       | Psig_typext te -> type_extension ~loc (sub.type_extension sub env te)
       | Psig_exception ed -> exception_ ~loc (rm_env sub.extension_constructor sub env ed)
       | Psig_module x -> module_ ~loc (rm_env sub.module_declaration sub env x)
@@ -343,7 +345,7 @@ module M = struct
 	 eval ~loc ~attrs:(sub.attributes sub env attrs) (rm_env sub.expr sub env x)
       | Pstr_value (r, vbs) -> value ~loc r (thread_opt (sub.value_binding sub) env vbs)
       | Pstr_primitive vd -> primitive ~loc (sub.value_description sub env vd)
-      | Pstr_type l -> type_ ~loc (thread (sub.type_declaration sub) env l)
+      | Pstr_type (rf,l) -> type_ ~loc rf (thread (sub.type_declaration sub) env l)
       | Pstr_typext te -> type_extension ~loc (sub.type_extension sub env  te)
       | Pstr_exception ed -> exception_ ~loc (rm_env sub.extension_constructor sub env ed)
       | Pstr_module x -> module_ ~loc ( try_ x @@ sub.module_binding sub env )
@@ -436,6 +438,7 @@ module E = struct
     | Pexp_open (ovf, lid, e) ->
         open_ ~loc ~attrs ovf (map_loc sub env lid) (rm_env sub.expr sub env e)
     | Pexp_extension x -> extension ~loc ~attrs (sub.extension sub env x)
+    | Pexp_unreachable -> unreachable ~loc ~attrs ()
 end
 
 module P = struct
@@ -696,6 +699,7 @@ let identity =
     payload =
       (fun this env-> function
          | PStr x -> PStr (rm_env this.structure this env x)
+         | PSig x -> PSig (rm_env this.signature this env x)
          | PTyp x -> PTyp ( rm_env this.typ this env x)
          | PPat (x, g) -> PPat ( rm_env this.pat this env  x, g |>? rm_env this.expr this env)
       );
@@ -704,8 +708,7 @@ let identity =
 let to_transform env env_mapper =
   Ppx_register.{
       implem = (fun structure ->
-		rm_env env_mapper.structure env_mapper env structure);
+        rm_env env_mapper.structure env_mapper env structure);
       iface = (fun signature ->
-	       rm_env env_mapper.signature env_mapper env signature);
+          rm_env env_mapper.signature env_mapper env signature);
   }
-    

@@ -16,7 +16,7 @@ Feature list:
 - [%ppx_listlike rewriter = {kind; nil; cons } ] define a new rewriter
    - kind : list, array_index, string_index,bigarray_index
    - nil, cons: the nil and cons constructor
-- [%ppx_listlike.associate ~module_ ~rewriter ] : automatically open the named rewriter when the corresponding module is opened
+- [%ppx_listlike.associatie ~module_ ~rewriter ] : automatically open the named rewriter when the corresponding module is opened
 *)
 
 
@@ -254,14 +254,14 @@ module Interpreter = struct
   let check_identifier loc s = match with_prefixed s with
     | None -> s
     | Some _ -> fatal_error loc @@ pp
-        "Ppx_listlike: invalide ppx_listlike identifier %s.\
+        "Ppx_listlike: invalid ppx_listlike identifier %s.\
          @\n Identifiers cannot start with a \"with_\" prefix" s
 
   let var pat = match pat.ppat_desc with
     | Ppat_var {Loc.txt;loc} -> check_identifier pat.ppat_loc txt
     | _ -> expected pat.ppat_loc "pattern variable"
   let const_string e= match e.pexp_desc with
-    | Pexp_constant ( Asttypes.Const_string(s, _ ) ) -> s
+    | Pexp_constant ( Pconst_string(s, _ ) ) -> s
     | _ -> expected e.pexp_loc "string litteral"
   let constructor e = match e.pexp_desc with
     | Pexp_construct(llid,None) -> llid.Loc.txt
